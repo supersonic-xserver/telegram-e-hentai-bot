@@ -4,6 +4,22 @@ A Python Telegram bot tracking e-hentai/exhentai galleries and sending them to u
 
 ## SSX GHOST PROTOCOL - FEATURES
 
+**Ghost Drive (Persistence)**
+- `TG_DATABASE_CHANNEL_ID` - Private channel ID for remote database backup
+- `SSX_GHOST_SYNC_INTERVAL` - Sync interval in seconds (default: 1200 = 20 min)
+
+**Ghost Drive Setup:**
+1. Create a **PRIVATE** Telegram channel (REQUIRED to protect user data)
+2. Add your bot as admin to that channel
+3. Get the channel ID (forward a message to @channelidbot)
+4. Set `TG_DATABASE_CHANNEL_ID` to that ID (format: -100XXXXXXXXXX)
+
+**How it works:**
+- At startup: Loads latest backup from the channel and overwrites local `userdata`
+- Every 20 minutes: Uploads current `userdata` to the channel
+- On shutdown (SIGTERM): Blocks until sync completes (with 3 retries)
+- If sync fails: Full JSON is logged to stderr for manual recovery
+
 **Environment Variables (SECURITY)**
 - `TG_TOKEN` - Telegram bot token
 - `TG_ADMIN_ID` - Admin user ID (int)

@@ -12,6 +12,21 @@ adminID = 'This is a test adminID.'
 
 pubChannelID = "" #Public channel ID, admin could send the result to this channel if the user allow.
 
+# =======================================================================
+# SSX GHOST DRIVE - Telegram Channel as Remote Database
+# =======================================================================
+# A private Telegram channel acts as a remote JSON database for persistence.
+# Bypasses Koyeb's ephemeral filesystem by storing user_data.json in a channel.
+# 
+# Setup Instructions:
+# 1. Create a private Telegram channel
+# 2. Add your bot to the channel as an admin
+# 3. Get the channel ID (use @userinfobot or forward a message to @channelidbot)
+# 4. Set TG_DATABASE_CHANNEL_ID to that ID
+# =======================================================================
+TG_DATABASE_CHANNEL_ID = ""  # Private channel ID for Ghost Drive backup storage
+SSX_GHOST_SYNC_INTERVAL = "1200"  # Sync interval in seconds (default: 20 minutes)
+
 interval = (3600*6)  #The interval (second) between every run of spiderfunction.
 
 timeoutRetry = 5 #Retry times to deal with the timeout issue while sending users' searching result.

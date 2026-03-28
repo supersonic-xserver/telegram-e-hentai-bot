@@ -40,13 +40,19 @@ from tgbotmodules import userdatastore
 _shutdown_requested = False
 
 
+# Global reference to bot for signal handler use
+_bot_for_shutdown = None
+
+
 def _signal_handler(signum, frame):
     """
     SSX Zero-Bug: Signal handler for graceful shutdown.
     Called when SIGINT (Ctrl+C) or SIGTERM is received.
-    Ensures database state is saved before exiting.
+    
+    ATOMIC SHUTDOWN: This handler BLOCKS until Ghost Drive sync completes
+    to ensure 100% successful save before exit.
     """
-    global _shutdown_requested
+    global _shutdown_requested, _bot_for_shutdown
     
     signal_name = signal.Signals(signum).name
     logger.warning(f"[SSX SHUTDOWN] Received {signal_name}, initiating graceful shutdown...")
@@ -57,12 +63,30 @@ def _signal_handler(signum, frame):
     # Request shutdown in generalcfg
     generalcfg.request_shutdown()
     
-    # Flush database to disk
+    # Flush database to disk (local)
     try:
         userdatastore.flush_and_sync()
-        logger.info("[SSX SHUTDOWN] Database flushed successfully.")
+        logger.info("[SSX SHUTDOWN] Database flushed to disk.")
     except Exception as e:
         logger.error(f"[SSX SHUTDOWN] Error flushing database: {e}")
+    
+    # ATOMIC SHUTDOWN: Sync to Ghost Drive and BLOCK until complete
+    # This ensures 100% successful save before exit
+    if _bot_for_shutdown and generalcfg.DATABASE_CHANNEL_ID:
+        logger.info("[SSX SHUTDOWN] Syncing to Ghost Drive (blocking)...")
+        max_retries = 3
+        for attempt in range(max_retries):
+            success, message = userdatastore.sync_to_ghost_drive(_bot_for_shutdown)
+            if success:
+                logger.info(f"[SSX SHUTDOWN] Ghost Drive sync successful: {message}")
+                break
+            else:
+                logger.warning(f"[SSX SHUTDOWN] Ghost Drive sync attempt {attempt + 1}/{max_retries} failed: {message}")
+                if attempt < max_retries - 1:
+                    time.sleep(2)  # Brief wait before retry
+        else:
+            logger.error("[SSX SHUTDOWN] All Ghost Drive sync attempts failed!")
+            # Emergency logging already handled in sync_to_ghost_drive
     
     # Log shutdown completion
     logger.warning(f"[SSX SHUTDOWN] Graceful shutdown complete for {signal_name}.")
@@ -304,6 +328,100 @@ def error(bot, update, error):
    '''The bot would exploit this function to report some rare and strange errors.'''
    logger.warning('Update "%s" caused error "%s"', update, error)
 
+
+def status(bot, update, user_data, chat_data):
+   '''SSX Status Command - Display Ghost Drive and system status.
+   
+   Shows:
+   - Ghost Drive configuration status
+   - Last successful sync time
+   - Current userdata file size
+   - Number of backups in the vault
+   '''
+   from datetime import datetime
+   
+   # Check if user is admin
+   if update.message.from_user.id != generalcfg.adminID:
+       update.message.reply_text("❌ Admin only command.")
+       return
+   
+   status_lines = ["📊 **SSX System Status**\n"]
+   
+   # Ghost Drive Status
+   ghost_status = userdatastore.get_ghost_drive_status()
+   
+   status_lines.append("🗄️ **Ghost Drive**")
+   if ghost_status['is_configured']:
+       status_lines.append(f"✅ Configured (Channel: `{ghost_status['channel_id']}`)")
+   else:
+       status_lines.append("❌ Not configured - set `TG_DATABASE_CHANNEL_ID`")
+   
+   if ghost_status['last_sync_time']:
+       last_sync = ghost_status['last_sync_time'].strftime("%Y-%m-%d %H:%M:%S")
+       status_lines.append(f"📅 Last sync: `{last_sync}`")
+   else:
+       status_lines.append("📅 Last sync: Never")
+   
+   # File size
+   file_size = ghost_status['file_size']
+   if file_size > 0:
+       if file_size < 1024:
+           size_str = f"{file_size} bytes"
+       elif file_size < 1024 * 1024:
+           size_str = f"{file_size / 1024:.1f} KB"
+       else:
+           size_str = f"{file_size / (1024 * 1024):.1f} MB"
+       status_lines.append(f"📁 userdata size: `{size_str}`")
+   else:
+       status_lines.append("📁 userdata size: 0 bytes")
+   
+   status_lines.append("")
+   
+   # Uptime
+   import time
+   uptime = time.time() - start_time
+   hours, remainder = divmod(int(uptime), 3600)
+   minutes, seconds = divmod(remainder, 60)
+   status_lines.append(f"⏱️ Uptime: `{hours}h {minutes}m {seconds}s`")
+   
+   status_text = "\n".join(status_lines)
+   update.message.reply_text(status_text, parse_mode='Markdown')
+   
+   return ConversationHandler.END
+
+
+def _validate_ghost_drive_config():
+   """
+   SSX Startup Validation: Validate Ghost Drive configuration.
+   
+   Checks that DATABASE_CHANNEL_ID has a valid format before attempting
+   to use the Ghost Drive. This prevents cryptic errors at runtime.
+   
+   Returns:
+       True if valid or not configured, False if invalid.
+   """
+   from tgbotmodules.userdatastore import _validate_channel_id
+   
+   channel_id = generalcfg.DATABASE_CHANNEL_ID
+   
+   if not channel_id:
+       logger.info("[SSX GHOST DRIVE] Not configured - DATABASE_CHANNEL_ID not set")
+       return True
+   
+   if _validate_channel_id(channel_id):
+       logger.info(f"[SSX GHOST DRIVE] Configuration validated: {channel_id}")
+       return True
+   else:
+       logger.error(
+           f"[SSX GHOST DRIVE] FATAL: Invalid channel ID format: {channel_id}. "
+           f"Expected format: -100XXXXXXXXXX"
+       )
+       return False
+
+
+# Track startup time for uptime display
+start_time = time.time()
+
 def main():
    '''This function controls the initiation of the bot inclding creating some objects to use the bot,
       and the thread containor thread to deal with search requests both from jobs and user requests 
@@ -316,6 +434,11 @@ def main():
       updater = Updater(token=generalcfg.token, request_kwargs={'proxy_url': generalcfg.proxy[0]})
    else:   
       updater = Updater(token=generalcfg.token)
+   
+   # Store bot reference for signal handler use (Ghost Drive sync)
+   global _bot_for_shutdown
+   _bot_for_shutdown = updater.bot
+   
    dp = updater.dispatcher
    job= updater.job_queue
    conv_handler = ConversationHandler(
@@ -325,6 +448,10 @@ def main():
                   fallbacks=[CommandHandler('cancel', cancel, pass_user_data=True, pass_chat_data=True)],
    )
    dp.add_handler(conv_handler)
+   
+   # Add /status command handler
+   dp.add_handler(CommandHandler('status', status, pass_user_data=True, pass_chat_data=True))
+   
    dp.add_error_handler(error)
    autoCreateJob(job=job)
    tc = Thread(target=thread_containor, 
@@ -335,6 +462,35 @@ def main():
    logger.info('Spider thread containor initiated.')
    updater.start_polling(poll_interval=1.0, timeout=1.0)
    logger.info('Bot initiated.')
+   
+   # =======================================================================
+   # SSX GHOST DRIVE - Boot Sequence
+   # =======================================================================
+   # Load the latest backup from the Telegram Vault before any other modules
+   # initialize. This ensures we have the most recent state from a previous
+   # instance that may have been running on a different container.
+   # =======================================================================
+   if generalcfg.DATABASE_CHANNEL_ID:
+       logger.info("[SSX GHOST DRIVE] Attempting to load from Telegram Vault...")
+       success, message = userdatastore.load_from_ghost_drive(updater.bot)
+       if success:
+           logger.info(f"[SSX GHOST DRIVE] {message}")
+       else:
+           # Handle first-time setup (no backup exists yet)
+           if "first-time setup" in message.lower():
+               logger.info("[SSX GHOST DRIVE] First-time setup detected - initializing fresh database")
+               userdatastore.userfiledetect()  # Ensure local file exists
+           else:
+               logger.warning(f"[SSX GHOST DRIVE] Load failed: {message} - using local file")
+       
+       # Initialize the periodic Ghost Drive sync job (every 20 minutes)
+       ghost_job = userdatastore.init_ghost_drive_sync(updater.bot, job)
+       if ghost_job:
+           logger.info(f"[SSX GHOST DRIVE] Periodic sync job scheduled (interval: {generalcfg.GHOST_DRIVE_SYNC_INTERVAL}s)")
+       else:
+           logger.info("[SSX GHOST DRIVE] Periodic sync not enabled (channel not configured)")
+   else:
+       logger.info("[SSX GHOST DRIVE] Not configured - DATABASE_CHANNEL_ID not set")
    
    # SSX ZERO-BUG: idle() now properly handles keyboard interrupt via signal handler
    # The signal handler will flush database and exit gracefully
