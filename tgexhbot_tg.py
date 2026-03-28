@@ -8,16 +8,20 @@ SSX Namespace Fix: Ensure workspace root is in sys.path for Koyeb compatibility.
 # =======================================================================
 # SSX PATH INJECTION - Fix imports for Koyeb execution environment
 # =======================================================================
-import sys
 import os
-# Add the directory containing this script to sys.path
-_script_dir = os.path.dirname(os.path.abspath(__file__))
-if _script_dir not in sys.path:
-    sys.path.insert(0, _script_dir)
-# Also add parent directory (workspace root)
-_workspace_root = os.path.dirname(_script_dir)
+import sys
+
+# Aggressive path injection: ensure workspace root is first priority
+_workspace_root = os.path.abspath(os.path.dirname(__file__))
 if _workspace_root not in sys.path:
     sys.path.insert(0, _workspace_root)
+
+# Also add current working directory (Koyeb may run from different cwd)
+_cwd = os.getcwd()
+if _cwd not in sys.path:
+    sys.path.insert(0, _cwd)
+
+print(f"[SSX DEBUG] sys.path = {sys.path}")
 
 
 # =======================================================================
