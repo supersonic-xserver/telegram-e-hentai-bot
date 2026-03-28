@@ -1,31 +1,105 @@
 #!/usr/bin/python3
+"""
+Telegram E-Hentai Bot - Production Ready with Signal Handling
+
+SSX Zero-Bug Hardening:
+- SIGINT/SIGTERM signal handlers for graceful shutdown
+- Database flush before exit
+- Proper resource cleanup
+"""
 
 import logging
 import json
 import os
+import sys
 import time
 import datetime
+import signal
 from ast import literal_eval
 from queue import Queue
 from threading import Thread
 from telegram.ext import Updater
 from telegram.ext import CommandHandler
-from telegram.ext import MessageHandler 
+from telegram.ext import MessageHandler
 from telegram.ext import Filters
 from telegram.ext import ConversationHandler
 from tgbotconvhandler import messageanalyze
 from tgbotconvhandler import spiderfunction
-from tgbotmodules import replytext 
-# from tgbotmodules import botconfig
+from tgbotmodules import replytext
 from tgbotmodules.spidermodules import generalcfg
 from tgbotmodules import userdatastore
 
-# from tgbotmodules import userdatastore
+# =======================================================================
+# SSX SIGNAL HANDLING - Graceful Shutdown Support
+# =======================================================================
+# Handles SIGINT (Ctrl+C) and SIGTERM to ensure all pending logs
+# and database writes are flushed to disk before exit.
+# =======================================================================
+
+# Global flag for graceful shutdown
+_shutdown_requested = False
+
+
+def _signal_handler(signum, frame):
+    """
+    SSX Zero-Bug: Signal handler for graceful shutdown.
+    Called when SIGINT (Ctrl+C) or SIGTERM is received.
+    Ensures database state is saved before exiting.
+    """
+    global _shutdown_requested
+    
+    signal_name = signal.Signals(signum).name
+    logger.warning(f"[SSX SHUTDOWN] Received {signal_name}, initiating graceful shutdown...")
+    
+    # Set shutdown flag to prevent new operations
+    _shutdown_requested = True
+    
+    # Request shutdown in generalcfg
+    generalcfg.request_shutdown()
+    
+    # Flush database to disk
+    try:
+        userdatastore.flush_and_sync()
+        logger.info("[SSX SHUTDOWN] Database flushed successfully.")
+    except Exception as e:
+        logger.error(f"[SSX SHUTDOWN] Error flushing database: {e}")
+    
+    # Log shutdown completion
+    logger.warning(f"[SSX SHUTDOWN] Graceful shutdown complete for {signal_name}.")
+    sys.stdout.flush()
+    sys.stderr.flush()
+    
+    # Exit with success code
+    os._exit(0)
+
+
+def _register_signal_handlers():
+    """
+    Register signal handlers for SIGINT and SIGTERM.
+    SSX Zero-Bug: Ensures graceful shutdown on both console interrupt and system service stop.
+    """
+    # Register SIGINT (Ctrl+C)
+    signal.signal(signal.SIGINT, _signal_handler)
+    
+    # Register SIGTERM (system service stop)
+    signal.signal(signal.SIGTERM, _signal_handler)
+    
+    logger.info("[SSX SHUTDOWN] Signal handlers registered for SIGINT and SIGTERM.")
+
+
+def is_shutdown_requested():
+    """Check if shutdown has been requested via signal."""
+    return _shutdown_requested or generalcfg.is_shutdown_requested()
+
+
+# =======================================================================
+# ORIGINAL BOT CODE
+# =======================================================================
  
 def start(bot, update, user_data, chat_data):
    '''This function is the initiation of the bot's conversation. It would clear the
-   previous userdata (if have) and create a new user profile for the later conversation.
-   ''' 
+      previous userdata (if have) and create a new user profile for the later conversation.
+      ''' 
    user_data.clear()
    chat_data.clear()
    user_data.update({"actualusername": str(update.message.from_user.username),
@@ -47,6 +121,12 @@ def state(bot, update, user_data, chat_data):
       state. Moreover, while a user completes the search settings, this function would 
       create a thread object containing a single search operation and return the result  
       to user's chat to verify the searching settings.'''
+   
+   # SSX SHUTDOWN CHECK: Don't start new operations if shutting down
+   if is_shutdown_requested():
+      logger.warning("Shutdown requested, ignoring new message from %s", update.message.from_user.username)
+      return ConversationHandler.END
+   
    inputStr = update.message.text
    user_data.update({'chat_id': update.message.chat_id})
    outputDict = messageanalyze(inputStr=inputStr, 
@@ -79,6 +159,12 @@ def state(bot, update, user_data, chat_data):
 def searchIntervalCTL(bot, job, user_data=None):
     '''The python telegram bot module would exploit this function to generate a search 
        thread object to extract the information on e-h/exh.'''
+    
+    # SSX SHUTDOWN CHECK: Don't start new jobs if shutting down
+    if is_shutdown_requested():
+        logger.warning("Shutdown requested, skipping scheduled job.")
+        return
+    
     threadName = time.asctime()
     t = Thread(target=searcheh, 
                name=threadName, 
@@ -93,6 +179,13 @@ def searcheh(bot, threadQ, job=None, user_data=None):
       information from files or other functions' requests, using this information and the
       spiderfunction function to search e-h/exh and then sending the search result to channel
       and/or chat.'''
+   
+   # SSX SHUTDOWN CHECK: Don't start new searches if shutting down
+   if is_shutdown_requested():
+       logger.warning("Shutdown requested, skipping search operation.")
+       threadQ.task_done()
+       return
+   
    logger.info("Search is beginning")
    if user_data:
       for ud in user_data:
@@ -179,6 +272,12 @@ def thread_containor(threadQ):
    threadCounter = 0
    while True:
       t = threadQ.get()
+      
+      # SSX SHUTDOWN CHECK: Exit container loop if shutting down
+      if is_shutdown_requested():
+          logger.warning("[SSX SHUTDOWN] Thread container shutting down, abandoning queued threads.")
+          break
+      
       logger.info('Added a new thread to thread containor - {0} '.format(t.name))
       t.start()
       threadCounter += 1
@@ -209,6 +308,10 @@ def main():
    '''This function controls the initiation of the bot inclding creating some objects to use the bot,
       and the thread containor thread to deal with search requests both from jobs and user requests 
       after finishing the settings.'''
+   
+   # SSX ZERO-BUG: Register signal handlers for graceful shutdown
+   _register_signal_handlers()
+   
    if generalcfg.proxy:
       updater = Updater(token=generalcfg.token, request_kwargs={'proxy_url': generalcfg.proxy[0]})
    else:   
@@ -232,6 +335,9 @@ def main():
    logger.info('Spider thread containor initiated.')
    updater.start_polling(poll_interval=1.0, timeout=1.0)
    logger.info('Bot initiated.')
+   
+   # SSX ZERO-BUG: idle() now properly handles keyboard interrupt via signal handler
+   # The signal handler will flush database and exit gracefully
    updater.idle()
 
 

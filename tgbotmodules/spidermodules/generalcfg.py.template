@@ -29,6 +29,20 @@ userPageLimit = 5 # The pages limitation (integret number) for every user's sear
                   # e-hentai/exhentai's server.  
 
 #------------------------spider session-------------------------
+# Rotating User-Agents for stealth - prevents E-Hentai from detecting bot patterns
+ROTATING_USER_AGENTS = [
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:121.0) Gecko/20100101 Firefox/121.0",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2 Safari/605.1.15",
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Edge/120.0.0.0",
+]
+
+# Human jitter settings - adds random delay between requests to avoid bot detection
+JITTER_MIN = 0.5  # Minimum delay in seconds
+JITTER_MAX = 2.0  # Maximum delay in seconds
+
 headers = [{"User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/51.0.2704.103 Safari/537.36",}]  
 # This list contains some headers for the requests module.
 # Bot admin do not need to alter this variable in ordinary situation.
@@ -44,6 +58,8 @@ proxy = [] # This variable would let both the bot module and the requests module
                                   # to access network, which is useful for the territory blocking telegram and/or e-hentai.
                                   # SUPPORT HTTP/HTTPS/SOCKS5 PROXIES.
                                   # EXAMPLE: proxy = ['http://127.0.0.1:1080'] or proxy = ['socks5://127.0.0.1:1080']
+                                  # Supports multiple proxies for rotation on 403/503 errors:
+                                  # proxy = ['http://proxy1:1080', 'http://proxy2:1080', 'socks5://proxy3:1080']
 
 dlFullPreviewImage = True # This variable would determin whether the bot downloads the first image in the gallery as 
                           # the preview image sending to channels.
@@ -51,6 +67,10 @@ dlFullPreviewImage = True # This variable would determin whether the bot downloa
 
 useEngTitle = False       # If true, the bot would return the galleries' English titles to user. Else it would return 
                           # Japanese titles (if have).
+
+#------------------------stealth session-------------------------
+ENABLE_STEALTH_MODE = False  # Set to True to enable rotating User-Agents, human jitter delays,
+                              # and proxy rotation on 403/503 errors. Helps prevent E-Hentai bans.
 
 dlRetry = 3  # This variable determins the retry times while downloading preview images.
 

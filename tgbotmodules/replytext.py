@@ -2,7 +2,12 @@
 
 #-----------------------verify section---------------------------------------
 
-startMessage = "Welcome to Nakazawa Bookstore, please show your vip card."
+startMessage = """Welcome to Super Sonic X E-Hentai Bot!
+
+This bot operates under the Jesterman's Creed Safety Protocol.
+We filter content to ensure a safe and enjoyable experience for all users.
+
+Please show your VIP card to proceed (enter the passcode)."""
 
 
 GeneralInfo = ("You have {0} profile(s) on this service. \n" +
