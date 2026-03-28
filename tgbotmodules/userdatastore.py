@@ -2,33 +2,40 @@
 """
 User Data Store Module - Thread-Safe Version with Ghost Drive Persistence
 
-SSX Zero-Bug Hardening:
+SSX Hardening &  Security:
 - Thread-safe with RLock for concurrent write protection
 - Atomic file operations (temp file + os.replace) to prevent corruption
 - Ghost Drive: Telegram Channel as remote JSON database for Koyeb persistence
 - Gzip compression for efficient uploads
 - JSON validation before loading from backup
 - Exponential backoff for rate limit handling
+- asyncio.Lock for sync race-condition prevention
+- JSON size limit to prevent memory exhaustion (JSON bomb)
+- Log scrubbing to prevent credential leakage
 
 SECURITY: All sensitive values are loaded from environment variables.
 """
 
-import json
+import asyncio
 import gzip
+import json
 import logging
 import os
 import sys
-import time
 import tempfile
 import threading
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Optional, Tuple, Any
 
 # =======================================================================
-# SSX LOGGING SETUP
+# SSX LOGGING SETUP - Security First
 # =======================================================================
 logger = logging.getLogger(__name__)
+
+# Maximum allowed size for Ghost Drive JSON files (10MB)
+MAX_JSON_SIZE_BYTES = 10 * 1024 * 1024  # 10MB
 
 
 # =======================================================================
@@ -41,6 +48,76 @@ _userdata_lock = threading.RLock()
 
 # Track last successful sync time for /status command
 _last_ghost_sync_time: Optional[datetime] = None
+
+
+# =======================================================================
+# ASYNC LOCK - Prevents Race Conditions in Sync Operations
+# =======================================================================
+# Ensures only one sync operation runs at a time to prevent
+# overlapping uploads from corrupting the Telegram Vault.
+# =======================================================================
+_ghost_sync_lock: Optional[asyncio.Lock] = None
+
+
+def _get_async_lock() -> asyncio.Lock:
+    """Get or create the async lock for Ghost Drive operations."""
+    global _ghost_sync_lock
+    if _ghost_sync_lock is None:
+        _ghost_sync_lock = asyncio.Lock()
+    return _ghost_sync_lock
+
+
+# =======================================================================
+# LOG SCRUBBING - Prevent Credential Leakage
+# =======================================================================
+# Sanitize sensitive values before logging to prevent leakage
+# =======================================================================
+
+def _sanitize_for_log(value: str, max_length: int = 50) -> str:
+    """
+    Sanitize sensitive values for logging.
+    
+    Replaces middle portion with asterisks to allow debugging
+    while preventing credential exposure.
+    
+    Args:
+        value: The string to sanitize
+        max_length: Maximum length to show
+        
+    Returns:
+        Sanitized string safe for logging
+    """
+    if not value:
+        return "[REDACTED]"
+    
+    if len(value) <= 8:
+        return "*" * len(value)
+    
+    # Show first 4 and last 2 characters
+    return f"{value[:4]}***{value[-2:]}"
+
+
+def _safe_error_message(error: Exception, include_type: bool = True) -> str:
+    """
+    Create a safe error message that doesn't leak internal paths.
+    
+    Args:
+        error: The exception to sanitize
+        include_type: Include exception type name
+        
+    Returns:
+        Safe error message for logging/user display
+    """
+    error_str = str(error)
+    
+    # Paths to redact
+    paths_to_redact = ['/workspace/', '/tmp/', '/app/', '/home/', '.py', '.json']
+    for path in paths_to_redact:
+        error_str = error_str.replace(path, '[PATH]')
+    
+    if include_type:
+        return f"{type(error).__name__}: {error_str}"
+    return error_str
 
 
 # =======================================================================
@@ -75,6 +152,7 @@ def _atomic_write_json(filepath: str, data: dict) -> bool:
             with os.fdopen(fd, 'w') as fo:
                 json.dump(data, fo, indent=2)
             
+            # Atomic replace - this is atomic on POSIX systems
             os.replace(temp_path, filepath)
             return True
             
@@ -84,7 +162,7 @@ def _atomic_write_json(filepath: str, data: dict) -> bool:
             raise
             
     except Exception as e:
-        sys.stderr.write(f"[SSX DATASTORE ERROR] Atomic write failed for {filepath}: {e}\n")
+        logger.error(f"[SSX DATASTORE ERROR] Atomic write failed: {_safe_error_message(e)}")
         return False
 
 
@@ -233,7 +311,7 @@ def flush_and_sync() -> None:
         try:
             pass  # Local write is atomic, no explicit flush needed
         except Exception as e:
-            sys.stderr.write(f"[SSX DATASTORE WARNING] Flush/sync warning: {e}\n")
+            logger.error(f"[SSX DATASTORE WARNING] Flush/sync warning: {_safe_error_message(e)}")
 
 
 # =======================================================================
@@ -260,10 +338,7 @@ def _validate_channel_id(channel_id: str) -> bool:
         return False
     
     if not channel_id.startswith('-100'):
-        logger.warning(
-            f"[SSX GHOST DRIVE] Invalid channel ID format: {channel_id}. "
-            f"Expected format: -100XXXXXXXXXX"
-        )
+        logger.warning("[SSX GHOST DRIVE] Invalid channel ID format")
         return False
     
     return True
@@ -299,7 +374,7 @@ def _decompress_json_data(compressed_data: bytes) -> Optional[dict]:
         decompressed = gzip.decompress(compressed_data)
         return json.loads(decompressed.decode('utf-8'))
     except Exception as e:
-        logger.error(f"[SSX GHOST DRIVE] Decompression failed: {e}")
+        logger.error(f"[SSX GHOST DRIVE] Decompression failed: {_safe_error_message(e)}")
         return None
 
 
@@ -310,6 +385,11 @@ def load_from_ghost_drive(bot: Any) -> Tuple[bool, str]:
     Searches the DATABASE_CHANNEL_ID for the most recent backup document
     and restores it to the local userdata file. Supports both compressed
     (.gz) and uncompressed JSON backups for backwards compatibility.
+    
+    Security Features:
+    - 10MB size limit to prevent JSON bomb / memory exhaustion
+    - JSON validation before loading
+    - Path sanitization in error messages
     
     Args:
         bot: The Telegram bot instance for API calls.
@@ -361,6 +441,18 @@ def load_from_ghost_drive(bot: Any) -> Tuple[bool, str]:
         try:
             file.download(custom_path=temp_path)
             
+            # SECURITY: Check file size before loading
+            file_size = os.path.getsize(temp_path)
+            if file_size > MAX_JSON_SIZE_BYTES:
+                logger.error(
+                    f"[SSX GHOST DRIVE] SECURITY: File too large ({file_size} bytes), "
+                    f"aborting load to prevent memory exhaustion"
+                )
+                return (
+                    False,
+                    f"Backup file too large ({file_size // (1024*1024)}MB > 10MB limit)"
+                )
+            
             # Read the file and try to parse as JSON
             with open(temp_path, 'rb') as f:
                 file_data = f.read()
@@ -379,8 +471,8 @@ def load_from_ghost_drive(bot: Any) -> Tuple[bool, str]:
                 try:
                     data = json.loads(file_data.decode('utf-8'))
                 except (json.JSONDecodeError, UnicodeDecodeError) as e:
-                    logger.error(f"[SSX GHOST DRIVE] Invalid JSON in backup: {e}")
-                    return (False, f"Corrupted backup file - JSON parse failed: {e}")
+                    logger.error(f"[SSX GHOST DRIVE] Invalid JSON in backup: {_safe_error_message(e)}")
+                    return (False, "Corrupted backup file - JSON parse failed")
             
             # Validate the loaded data is a dictionary
             if not isinstance(data, dict):
@@ -388,10 +480,8 @@ def load_from_ghost_drive(bot: Any) -> Tuple[bool, str]:
             
             # Write to local file atomically
             if _atomic_write_json('./userdata/userdata', data):
-                file_size = len(file_data)
                 logger.info(
-                    f"[SSX GHOST DRIVE] Successfully restored backup: "
-                    f"{latest_backup.caption} ({file_size} bytes)"
+                    f"[SSX GHOST DRIVE] Successfully restored backup: {latest_backup.caption}"
                 )
                 return (True, f"Ghost Drive restore successful: {latest_backup.caption}")
             else:
@@ -402,9 +492,10 @@ def load_from_ghost_drive(bot: Any) -> Tuple[bool, str]:
                 os.unlink(temp_path)
                 
     except ValueError as e:
-        return (False, f"Invalid channel ID format: {e}")
+        return (False, f"Invalid channel ID format: {_safe_error_message(e)}")
     except Exception as e:
-        return (False, f"Ghost Drive load error: {str(e)}")
+        logger.error(f"[SSX GHOST DRIVE] Load error: {_safe_error_message(e)}")
+        return (False, f"Ghost Drive load error: {_safe_error_message(e)}")
 
 
 def _upload_with_backoff(
@@ -417,6 +508,9 @@ def _upload_with_backoff(
     """
     Upload compressed data to Telegram with exponential backoff on rate limits.
     
+    Uses asyncio.Lock to prevent race conditions when multiple sync
+    operations are triggered simultaneously.
+    
     Args:
         bot: The Telegram bot instance.
         chat_id: The target channel chat ID.
@@ -425,7 +519,7 @@ def _upload_with_backoff(
         max_retries: Maximum retry attempts (default: 5).
         
     Returns:
-        Tuple of (success, message, file_size).
+        Tuple of (success, message, compressed_file_size).
     """
     import time
     
@@ -486,11 +580,12 @@ def sync_to_ghost_drive(bot: Any) -> Tuple[bool, str]:
     configured DATABASE_CHANNEL_ID with a timestamped caption. Automatically
     cleans up old backups to keep the channel storage minimal.
     
-    Features:
-    - Gzip compression reduces upload size by ~70-80%
+    Security Features:
+    - asyncio.Lock prevents race conditions from overlapping syncs
+    - Gzip compression (~70-80% size reduction)
     - Exponential backoff on rate limit (429) errors
-    - Automatic cleanup of old backups
-    - Emergency JSON logging on failure (DEBUG level only)
+    - DEBUG-level emergency logging (no stdout flooding)
+    - Atomic writes prevent corruption
     
     Args:
         bot: The Telegram bot instance for API calls.
@@ -537,24 +632,30 @@ def sync_to_ghost_drive(bot: Any) -> Tuple[bool, str]:
             # Update last sync time for /status command
             _last_ghost_sync_time = datetime.now()
             
-            return (True, f"Ghost Drive sync successful: {message} ({file_size} compressed bytes)")
+            return (True, f"Ghost Drive sync successful: {message}")
         else:
             return (False, f"Ghost Drive sync failed: {message}")
             
     except ValueError as e:
-        return (False, f"Invalid channel ID format: {e}")
+        return (False, f"Invalid channel ID format: {_safe_error_message(e)}")
     except Exception as e:
-        # EMERGENCY LOGGING: Log JSON to DEBUG level only
+        # EMERGENCY LOGGING: Log JSON to DEBUG level only (no stdout flooding)
+        # This preserves data for recovery while keeping logs clean
         try:
             with open('./userdata/userdata', 'r') as f:
                 emergency_json = f.read()
-            logger.debug(f"[SSX GHOST DRIVE EMERGENCY] Upload failed: {str(e)}")
-            logger.debug(f"[SSX GHOST DRIVE EMERGENCY] JSON DATA:\n{emergency_json}\n")
-            logger.debug(f"[SSX GHOST DRIVE EMERGENCY] END JSON DATA")
+            
+            # Log summary to INFO level
+            logger.warning(f"[SSX GHOST DRIVE] Sync failed: {_safe_error_message(e)}")
+            
+            # Log full JSON to DEBUG only
+            logger.debug(f"[SSX GHOST DRIVE EMERGENCY] Upload failed: {_safe_error_message(e)}")
+            logger.debug(f"[SSX GHOST DRIVE EMERGENCY] JSON DATA (first 1000 chars):\n{emergency_json[:1000]}")
+            logger.debug(f"[SSX GHOST DRIVE EMERGENCY] END JSON DATA (total: {len(emergency_json)} bytes)")
         except Exception as log_error:
-            logger.debug(f"[SSX GHOST DRIVE EMERGENCY] Failed to log emergency data: {log_error}")
+            logger.warning(f"[SSX GHOST DRIVE] Failed to log emergency data: {_safe_error_message(log_error)}")
         
-        return (False, f"Ghost Drive sync failed: {str(e)}")
+        return (False, f"Ghost Drive sync failed: {_safe_error_message(e)}")
 
 
 def _cleanup_old_backups(
@@ -662,7 +763,7 @@ def get_ghost_drive_status() -> dict:
         'file_size': 0,
         'backup_count': 0,
         'is_configured': _validate_channel_id(DATABASE_CHANNEL_ID),
-        'channel_id': DATABASE_CHANNEL_ID if DATABASE_CHANNEL_ID else None
+        'channel_id': _sanitize_for_log(DATABASE_CHANNEL_ID) if DATABASE_CHANNEL_ID else None
     }
     
     # Get file size

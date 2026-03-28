@@ -1,33 +1,51 @@
 #!/usr/bin/python3
 """
-Telegram E-Hentai Bot - Production Ready with Signal Handling
+Telegram E-Hentai Bot - Python-Telegram-Bot v20+ Compatible
 
 SSX Zero-Bug Hardening:
+- Fully async/await architecture for v20+
 - SIGINT/SIGTERM signal handlers for graceful shutdown
 - Database flush before exit
 - Proper resource cleanup
+
+Migration from v13 to v20:
+- Updater -> Application.builder()
+- Filters -> filters (lowercase module, uppercase attributes)
+- All handlers are now async def
+- All bot API calls use await
 """
 
+import asyncio
 import logging
-import json
 import os
 import sys
 import time
-import datetime
 import signal
-from ast import literal_eval
-from queue import Queue
-from threading import Thread
-from telegram.ext import Updater
-from telegram.ext import CommandHandler
-from telegram.ext import MessageHandler
-from telegram.ext import Filters
-from telegram.ext import ConversationHandler
+from typing import Optional
+
+# Python Telegram Bot v20+ imports
+from telegram import Update, BotCommand
+from telegram.ext import (
+    Application,
+    ApplicationBuilder,
+    CommandHandler,
+    MessageHandler,
+    ConversationHandler,
+    ContextTypes,
+    filters,
+)
+
 from tgbotconvhandler import messageanalyze
 from tgbotconvhandler import spiderfunction
 from tgbotmodules import replytext
 from tgbotmodules.spidermodules import generalcfg
 from tgbotmodules import userdatastore
+
+# =======================================================================
+# SSX LOGGING SETUP
+# =======================================================================
+logger = logging.getLogger(__name__)
+
 
 # =======================================================================
 # SSX SIGNAL HANDLING - Graceful Shutdown Support
@@ -39,14 +57,13 @@ from tgbotmodules import userdatastore
 # Global flag for graceful shutdown
 _shutdown_requested = False
 
-
 # Global reference to bot for signal handler use
 _bot_for_shutdown = None
 
 
-def _signal_handler(signum, frame):
+async def _async_signal_handler():
     """
-    SSX Zero-Bug: Signal handler for graceful shutdown.
+    SSX Zero-Bug: Async signal handler for graceful shutdown.
     Called when SIGINT (Ctrl+C) or SIGTERM is received.
     
     ATOMIC SHUTDOWN: This handler BLOCKS until Ghost Drive sync completes
@@ -54,8 +71,7 @@ def _signal_handler(signum, frame):
     """
     global _shutdown_requested, _bot_for_shutdown
     
-    signal_name = signal.Signals(signum).name
-    logger.warning(f"[SSX SHUTDOWN] Received {signal_name}, initiating graceful shutdown...")
+    logger.warning("[SSX SHUTDOWN] Signal received, initiating graceful shutdown...")
     
     # Set shutdown flag to prevent new operations
     _shutdown_requested = True
@@ -76,25 +92,35 @@ def _signal_handler(signum, frame):
         logger.info("[SSX SHUTDOWN] Syncing to Ghost Drive (blocking)...")
         max_retries = 3
         for attempt in range(max_retries):
-            success, message = userdatastore.sync_to_ghost_drive(_bot_for_shutdown)
+            success, message = await asyncio.get_event_loop().run_in_executor(
+                None, userdatastore.sync_to_ghost_drive, _bot_for_shutdown
+            )
             if success:
                 logger.info(f"[SSX SHUTDOWN] Ghost Drive sync successful: {message}")
                 break
             else:
                 logger.warning(f"[SSX SHUTDOWN] Ghost Drive sync attempt {attempt + 1}/{max_retries} failed: {message}")
                 if attempt < max_retries - 1:
-                    time.sleep(2)  # Brief wait before retry
+                    await asyncio.sleep(2)
         else:
             logger.error("[SSX SHUTDOWN] All Ghost Drive sync attempts failed!")
-            # Emergency logging already handled in sync_to_ghost_drive
     
     # Log shutdown completion
-    logger.warning(f"[SSX SHUTDOWN] Graceful shutdown complete for {signal_name}.")
+    logger.warning("[SSX SHUTDOWN] Graceful shutdown complete.")
     sys.stdout.flush()
     sys.stderr.flush()
-    
-    # Exit with success code
-    os._exit(0)
+
+
+def _signal_handler(signum, frame):
+    """
+    SSX Zero-Bug: Synchronous signal handler wrapper.
+    Creates a new async event loop for the async shutdown handler.
+    """
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    loop.run_until_complete(_async_signal_handler())
+    loop.close()
+    sys.exit(0)
 
 
 def _register_signal_handlers():
@@ -102,408 +128,379 @@ def _register_signal_handlers():
     Register signal handlers for SIGINT and SIGTERM.
     SSX Zero-Bug: Ensures graceful shutdown on both console interrupt and system service stop.
     """
-    # Register SIGINT (Ctrl+C)
     signal.signal(signal.SIGINT, _signal_handler)
-    
-    # Register SIGTERM (system service stop)
     signal.signal(signal.SIGTERM, _signal_handler)
-    
     logger.info("[SSX SHUTDOWN] Signal handlers registered for SIGINT and SIGTERM.")
 
 
-def is_shutdown_requested():
+def is_shutdown_requested() -> bool:
     """Check if shutdown has been requested via signal."""
     return _shutdown_requested or generalcfg.is_shutdown_requested()
 
 
 # =======================================================================
-# ORIGINAL BOT CODE
+# BOT HANDLERS (All async for v20+)
 # =======================================================================
- 
-def start(bot, update, user_data, chat_data):
-   '''This function is the initiation of the bot's conversation. It would clear the
-      previous userdata (if have) and create a new user profile for the later conversation.
-      ''' 
-   user_data.clear()
-   chat_data.clear()
-   user_data.update({"actualusername": str(update.message.from_user.username),
-                     "chat_id": update.message.chat_id}
-                   )
-   logger.info("Actual username is %s.", str(update.message.from_user.username))
-   update.message.reply_text(text=replytext.startMessage)
-   chat_data.update({'state': 'verify'})
-   return STATE
 
-def state(bot, update, user_data, chat_data):
-   '''This function would handle the whole interactions between user and bot. In other
-      words, it is a simple mimic of the python telegram bot's conversation handler 
-      module and providing a convenient way to move this program to other IM platforms.
-      The major process of this function is receiving a user message and send it to 
-      messageanalyze function. Then the messageanalyze function would return the result
-      depend on the content of the message. It exploited user_data and chat_data provided 
-      by the python telegram bot module to store user information as well as the user 
-      state. Moreover, while a user completes the search settings, this function would 
-      create a thread object containing a single search operation and return the result  
-      to user's chat to verify the searching settings.'''
-   
-   # SSX SHUTDOWN CHECK: Don't start new operations if shutting down
-   if is_shutdown_requested():
-      logger.warning("Shutdown requested, ignoring new message from %s", update.message.from_user.username)
-      return ConversationHandler.END
-   
-   inputStr = update.message.text
-   user_data.update({'chat_id': update.message.chat_id})
-   outputDict = messageanalyze(inputStr=inputStr, 
-                               user_data=user_data, 
-                               chat_data=chat_data,
-                               logger=logger
-                              )
-   user_data.update(outputDict["outputUser_data"])
-   chat_data.update(outputDict["outputChat_data"])
-   for text in outputDict["outputTextList"]:
-      update.message.reply_text(text=text)
-   if chat_data['state'] != 'END':
-      state = STATE 
-   else:
-      # print (user_data)
-      userdata = ({chat_data["virtualusername"]: user_data})
-      threadName = time.asctime()
-      t = Thread(target=searcheh, 
-                 name=threadName, 
-                 kwargs={'bot':bot,
-                         'user_data':user_data,
-                         'threadQ': threadQ})
-      threadQ.put(t)
-      user_data.clear()
-      chat_data.clear() 
-      logger.info("The user_data and chat_data of user %s is clear.", str(update.message.from_user.username))
-      state = ConversationHandler.END
-   return state
+# Conversation states
+STATE = range(1)
 
-def searchIntervalCTL(bot, job, user_data=None):
-    '''The python telegram bot module would exploit this function to generate a search 
-       thread object to extract the information on e-h/exh.'''
+# Track startup time for uptime display
+start_time = time.time()
+
+
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Start command handler - initiate conversation.
     
+    Clears previous user data and creates a new profile for the user.
+    """
+    context.user_data.clear()
+    context.chat_data.clear()
+    context.user_data.update({
+        "actualusername": str(update.message.from_user.username),
+        "chat_id": update.message.chat_id
+    })
+    logger.info("Actual username is %s.", str(update.message.from_user.username))
+    await update.message.reply_text(text=replytext.startMessage)
+    context.chat_data.update({'state': 'verify'})
+    return STATE
+
+
+async def state_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """
+    Main conversation handler - processes user messages.
+    
+    Receives user input, analyzes it, and manages the conversation flow.
+    Creates search threads when user completes profile settings.
+    """
+    # SSX SHUTDOWN CHECK: Don't start new operations if shutting down
+    if is_shutdown_requested():
+        logger.warning("Shutdown requested, ignoring new message from %s", update.message.from_user.username)
+        return ConversationHandler.END
+    
+    inputStr = update.message.text
+    context.user_data.update({'chat_id': update.message.chat_id})
+    outputDict = messageanalyze(
+        inputStr=inputStr,
+        user_data=context.user_data,
+        chat_data=context.chat_data,
+        logger=logger
+    )
+    context.user_data.update(outputDict["outputUser_data"])
+    context.chat_data.update(outputDict["outputChat_data"])
+    
+    for text in outputDict["outputTextList"]:
+        await update.message.reply_text(text=text)
+    
+    if context.chat_data['state'] != 'END':
+        return STATE
+    else:
+        userdata = ({context.chat_data["virtualusername"]: context.user_data})
+        threadName = time.asctime()
+        
+        # Create search thread
+        context.application.create_task(
+            searcheh(
+                context.bot,
+                context.user_data.copy(),
+                threadName=threadName
+            )
+        )
+        
+        context.user_data.clear()
+        context.chat_data.clear()
+        logger.info("The user_data and chat_data of user %s is clear.", str(update.message.from_user.username))
+        return ConversationHandler.END
+
+
+async def searchIntervalCTL(context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Scheduled job to create search threads."""
     # SSX SHUTDOWN CHECK: Don't start new jobs if shutting down
     if is_shutdown_requested():
         logger.warning("Shutdown requested, skipping scheduled job.")
         return
     
     threadName = time.asctime()
-    t = Thread(target=searcheh, 
-               name=threadName, 
-               kwargs={'bot':bot,
-                        'user_data':user_data,
-                        'threadQ': threadQ})
-    threadQ.put(t)
+    context.application.create_task(
+        searcheh(context.bot, None, threadName=threadName)
+    )
 
 
-def searcheh(bot, threadQ, job=None, user_data=None):
-   '''This function controls the whole search process, including reading the search relating 
-      information from files or other functions' requests, using this information and the
-      spiderfunction function to search e-h/exh and then sending the search result to channel
-      and/or chat.'''
-   
-   # SSX SHUTDOWN CHECK: Don't start new searches if shutting down
-   if is_shutdown_requested():
-       logger.warning("Shutdown requested, skipping search operation.")
-       threadQ.task_done()
-       return
-   
-   logger.info("Search is beginning")
-   if user_data:
-      for ud in user_data:
-         user_data[ud].update({'userpubchenn': False,'resultToChat': True})
-         logger.info("User %s has finished profile setting process, test search is begining.", user_data[ud]['actualusername'])
-      # print (user_data)
-      spiderDict = user_data
-      toTelegramDict = spiderfunction(logger=logger, spiderDict=spiderDict)
-   else:
-      spiderDict = userdatastore.getspiderinfo()
-      toTelegramDict = spiderfunction(logger=logger)
-      logger.info("All users' search has been completed, begin to send the result")
-   if toTelegramDict:
-      for td in toTelegramDict:
-
-         chat_idList = []     
-         if spiderDict[td].get('chat_id') and spiderDict[td]['resultToChat'] == True:
-            chat_idList.append(spiderDict[td]['chat_id'])
-         if spiderDict[td]["userpubchenn"] == True and generalcfg.pubChannelID:      # Public channel id might be empty
-            chat_idList.append(generalcfg.pubChannelID)
-         logger.info("Begin to send user %s's result.", td)
-         
-         for chat_id in chat_idList:
-            if len(toTelegramDict[td]) == 0:
-               messageDict = {"messageCate": "message",
-                              "messageContent": ["------Could not find any new result for {0}------".format(str(td))]}
-               channelmessage(bot=bot, messageDict=messageDict, chat_id=chat_id)
-               continue
-            messageDict = {"messageCate": "message",
-                           "messageContent": ["------This is the result of {0}------".format(str(td))]}
-            channelmessage(bot=bot, messageDict=messageDict, chat_id=chat_id)
-            for manga in toTelegramDict[td]:
-            #    for obj in toTelegramDict[td][result]:
-               if manga.previewImageObj:
-                #   print(manga.previewImageObj.getbuffer().nbytes)
-                  messageDict = {'messageCate': "photo", "messageContent": [manga.previewImageObj]}
-                  channelmessage(bot=bot, messageDict=messageDict, chat_id=chat_id)
-               messageDict = {'messageCate': "message", "messageContent": ['{0}\n{1}'.format(manga.title, manga.url)]}
-               channelmessage(bot=bot, messageDict=messageDict, chat_id=chat_id)
-         logger.info("User {0}'s result has been sent.".format(td))
-      logger.info("All users' result has been sent.")
-   else: 
-      logger.info("Could not gain any new result to users.")         
-      messageDict = {"messageCate": "message", "messageContent": ["We do not have any new result"]}
-      channelmessage(bot=bot, messageDict=messageDict, chat_id=generalcfg.pubChannelID)
-   threadQ.task_done()
-
-def retryDocorator(func, retry=generalcfg.timeoutRetry):
-   '''This simple retry decorator provides a try-except looping to the channelmessage function to
-      overcome network fluctuation.'''
-
-   def wrapperFunction(*args, **kwargs):
-      err = 0 
-      for err in range(retry):
-         try:
-            func(*args, **kwargs)
-            break
-         except Exception as error:
-           err += 1
-           logger.warning(str(error))
-      else:
-         logger.warning('Retry limitation reached')
-         
-      return
-   return wrapperFunction
-
-@retryDocorator
-def channelmessage(bot, messageDict, chat_id):
-   ''' All the functions containing user interaction would use this function to send messand 
-       to user.'''
-   messageContent = messageDict["messageContent"]
-   for mC in messageContent:
-      if messageDict['messageCate'] == 'photo':
-         mC.seek(0)
-         bot.send_photo(chat_id=chat_id, photo=mC)
-      else:
-         bot.send_message(chat_id=chat_id, text=mC)
-   return None
-
-def thread_containor(threadQ):
-   '''This simple thread containor could force the the program running a single search thread
-      simultaneously to prevent e-h/exh ban the server's IP. In the idle status, the threadQ.get()
-      method would block the infinity loop preventing it comsuming resources.'''
-   threadCounter = 0
-   while True:
-      t = threadQ.get()
-      
-      # SSX SHUTDOWN CHECK: Exit container loop if shutting down
-      if is_shutdown_requested():
-          logger.warning("[SSX SHUTDOWN] Thread container shutting down, abandoning queued threads.")
-          break
-      
-      logger.info('Added a new thread to thread containor - {0} '.format(t.name))
-      t.start()
-      threadCounter += 1
-      if threadCounter == 1:  # This condition limit the amount of threads running simultaneously.
-         t.join() 
-         threadCounter = 0
-
-def autoCreateJob(job):
-   '''The python telegram bot's job module would exploit this function to create a recursive job to
-      run the users' setted search request stored on the disk.'''
-   job.run_repeating(searchIntervalCTL, interval=generalcfg.interval, first=5)
-
-def cancel(bot, update, user_data, chat_data):  
-   '''If user type a /cancel command, the program would use this function to delete the user's current 
-      data and status.'''
-   update.message.reply_text(text=replytext.UserCancel)
-   logger.info("User %s has canceled the process.", str(update.message.from_user.username))
-   user_data.clear()
-   chat_data.clear()
-   logger.info("The user_data and chat_data of user %s has cleared", str(update.message.from_user.username))
-   return ConversationHandler.END
-
-def error(bot, update, error):
-   '''The bot would exploit this function to report some rare and strange errors.'''
-   logger.warning('Update "%s" caused error "%s"', update, error)
+async def searcheh(bot, user_data, threadName: str = None) -> None:
+    """
+    Main search function - controls the spider and result delivery.
+    
+    Args:
+        bot: Bot instance for sending messages
+        user_data: Optional user data dict (None for all users)
+        threadName: Name for the search thread
+    """
+    # SSX SHUTDOWN CHECK: Don't start new searches if shutting down
+    if is_shutdown_requested():
+        logger.warning("Shutdown requested, skipping search operation.")
+        return
+    
+    logger.info("Search is beginning")
+    
+    if user_data:
+        for ud in user_data:
+            user_data[ud].update({'userpubchenn': False, 'resultToChat': True})
+            logger.info("User %s has finished profile setting process, test search is beginning.", 
+                       user_data[ud]['actualusername'])
+        spiderDict = user_data
+        toTelegramDict = spiderfunction(logger=logger, spiderDict=spiderDict)
+    else:
+        spiderDict = userdatastore.getspiderinfo()
+        toTelegramDict = spiderfunction(logger=logger)
+        logger.info("All users' search has been completed, begin to send the result")
+    
+    if toTelegramDict:
+        for td in toTelegramDict:
+            chat_idList = []
+            
+            if spiderDict[td].get('chat_id') and spiderDict[td]['resultToChat'] == True:
+                chat_idList.append(spiderDict[td]['chat_id'])
+            if spiderDict[td]["userpubchenn"] == True and generalcfg.pubChannelID:
+                chat_idList.append(generalcfg.pubChannelID)
+            
+            logger.info("Begin to send user %s's result.", td)
+            
+            for chat_id in chat_idList:
+                if len(toTelegramDict[td]) == 0:
+                    message = f"------Could not find any new result for {td}------"
+                    await bot.send_message(chat_id=chat_id, text=message)
+                    continue
+                
+                message = f"------This is the result of {td}------"
+                await bot.send_message(chat_id=chat_id, text=message)
+                
+                for manga in toTelegramDict[td]:
+                    if manga.previewImageObj:
+                        manga.previewImageObj.seek(0)
+                        await bot.send_photo(
+                            chat_id=chat_id,
+                            photo=manga.previewImageObj
+                        )
+                    await bot.send_message(
+                        chat_id=chat_id,
+                        text=f"{manga.title}\n{manga.url}"
+                    )
+            
+            logger.info("User %s's result has been sent.", td)
+        
+        logger.info("All users' result has been sent.")
+    else:
+        logger.info("Could not gain any new result to users.")
+        if generalcfg.pubChannelID:
+            await bot.send_message(
+                chat_id=generalcfg.pubChannelID,
+                text="We do not have any new result"
+            )
 
 
-def status(bot, update, user_data, chat_data):
-   '''SSX Status Command - Display Ghost Drive and system status.
-   
-   Shows:
-   - Ghost Drive configuration status
-   - Last successful sync time
-   - Current userdata file size
-   - Number of backups in the vault
-   '''
-   from datetime import datetime
-   
-   # Check if user is admin
-   if update.message.from_user.id != generalcfg.adminID:
-       update.message.reply_text("❌ Admin only command.")
-       return
-   
-   status_lines = ["📊 **SSX System Status**\n"]
-   
-   # Ghost Drive Status
-   ghost_status = userdatastore.get_ghost_drive_status()
-   
-   status_lines.append("🗄️ **Ghost Drive**")
-   if ghost_status['is_configured']:
-       status_lines.append(f"✅ Configured (Channel: `{ghost_status['channel_id']}`)")
-   else:
-       status_lines.append("❌ Not configured - set `TG_DATABASE_CHANNEL_ID`")
-   
-   if ghost_status['last_sync_time']:
-       last_sync = ghost_status['last_sync_time'].strftime("%Y-%m-%d %H:%M:%S")
-       status_lines.append(f"📅 Last sync: `{last_sync}`")
-   else:
-       status_lines.append("📅 Last sync: Never")
-   
-   # File size
-   file_size = ghost_status['file_size']
-   if file_size > 0:
-       if file_size < 1024:
-           size_str = f"{file_size} bytes"
-       elif file_size < 1024 * 1024:
-           size_str = f"{file_size / 1024:.1f} KB"
-       else:
-           size_str = f"{file_size / (1024 * 1024):.1f} MB"
-       status_lines.append(f"📁 userdata size: `{size_str}`")
-   else:
-       status_lines.append("📁 userdata size: 0 bytes")
-   
-   status_lines.append("")
-   
-   # Uptime
-   import time
-   uptime = time.time() - start_time
-   hours, remainder = divmod(int(uptime), 3600)
-   minutes, seconds = divmod(remainder, 60)
-   status_lines.append(f"⏱️ Uptime: `{hours}h {minutes}m {seconds}s`")
-   
-   status_text = "\n".join(status_lines)
-   update.message.reply_text(status_text, parse_mode='Markdown')
-   
-   return ConversationHandler.END
+async def autoCreateJob(application: Application) -> None:
+    """Create the recurring search job."""
+    application.job_queue.run_repeating(
+        searchIntervalCTL,
+        interval=generalcfg.interval,
+        first=5
+    )
 
 
-def _validate_ghost_drive_config():
-   """
-   SSX Startup Validation: Validate Ghost Drive configuration.
-   
-   Checks that DATABASE_CHANNEL_ID has a valid format before attempting
-   to use the Ghost Drive. This prevents cryptic errors at runtime.
-   
-   Returns:
-       True if valid or not configured, False if invalid.
-   """
-   from tgbotmodules.userdatastore import _validate_channel_id
-   
-   channel_id = generalcfg.DATABASE_CHANNEL_ID
-   
-   if not channel_id:
-       logger.info("[SSX GHOST DRIVE] Not configured - DATABASE_CHANNEL_ID not set")
-       return True
-   
-   if _validate_channel_id(channel_id):
-       logger.info(f"[SSX GHOST DRIVE] Configuration validated: {channel_id}")
-       return True
-   else:
-       logger.error(
-           f"[SSX GHOST DRIVE] FATAL: Invalid channel ID format: {channel_id}. "
-           f"Expected format: -100XXXXXXXXXX"
-       )
-       return False
+async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Cancel command handler - clears user data."""
+    await update.message.reply_text(text=replytext.UserCancel)
+    logger.info("User %s has canceled the process.", str(update.message.from_user.username))
+    context.user_data.clear()
+    context.chat_data.clear()
+    logger.info("The user_data and chat_data of user %s has cleared", 
+               str(update.message.from_user.username))
+    return ConversationHandler.END
 
 
-# Track startup time for uptime display
-start_time = time.time()
-
-def main():
-   '''This function controls the initiation of the bot inclding creating some objects to use the bot,
-      and the thread containor thread to deal with search requests both from jobs and user requests 
-      after finishing the settings.'''
-   
-   # SSX ZERO-BUG: Register signal handlers for graceful shutdown
-   _register_signal_handlers()
-   
-   if generalcfg.proxy:
-      updater = Updater(token=generalcfg.token, request_kwargs={'proxy_url': generalcfg.proxy[0]})
-   else:   
-      updater = Updater(token=generalcfg.token)
-   
-   # Store bot reference for signal handler use (Ghost Drive sync)
-   global _bot_for_shutdown
-   _bot_for_shutdown = updater.bot
-   
-   dp = updater.dispatcher
-   job= updater.job_queue
-   conv_handler = ConversationHandler(
-                  entry_points=[CommandHandler('start', start, pass_user_data=True, pass_chat_data=True)],
-                  states={STATE: [MessageHandler(Filters.text, state, pass_user_data=True, pass_chat_data=True)]
-                  },
-                  fallbacks=[CommandHandler('cancel', cancel, pass_user_data=True, pass_chat_data=True)],
-   )
-   dp.add_handler(conv_handler)
-   
-   # Add /status command handler
-   dp.add_handler(CommandHandler('status', status, pass_user_data=True, pass_chat_data=True))
-   
-   dp.add_error_handler(error)
-   autoCreateJob(job=job)
-   tc = Thread(target=thread_containor, 
-               name='tc', 
-               kwargs={'threadQ': threadQ},
-               daemon=True)
-   tc.start()
-   logger.info('Spider thread containor initiated.')
-   updater.start_polling(poll_interval=1.0, timeout=1.0)
-   logger.info('Bot initiated.')
-   
-   # =======================================================================
-   # SSX GHOST DRIVE - Boot Sequence
-   # =======================================================================
-   # Load the latest backup from the Telegram Vault before any other modules
-   # initialize. This ensures we have the most recent state from a previous
-   # instance that may have been running on a different container.
-   # =======================================================================
-   if generalcfg.DATABASE_CHANNEL_ID:
-       logger.info("[SSX GHOST DRIVE] Attempting to load from Telegram Vault...")
-       success, message = userdatastore.load_from_ghost_drive(updater.bot)
-       if success:
-           logger.info(f"[SSX GHOST DRIVE] {message}")
-       else:
-           # Handle first-time setup (no backup exists yet)
-           if "first-time setup" in message.lower():
-               logger.info("[SSX GHOST DRIVE] First-time setup detected - initializing fresh database")
-               userdatastore.userfiledetect()  # Ensure local file exists
-           else:
-               logger.warning(f"[SSX GHOST DRIVE] Load failed: {message} - using local file")
-       
-       # Initialize the periodic Ghost Drive sync job (every 20 minutes)
-       ghost_job = userdatastore.init_ghost_drive_sync(updater.bot, job)
-       if ghost_job:
-           logger.info(f"[SSX GHOST DRIVE] Periodic sync job scheduled (interval: {generalcfg.GHOST_DRIVE_SYNC_INTERVAL}s)")
-       else:
-           logger.info("[SSX GHOST DRIVE] Periodic sync not enabled (channel not configured)")
-   else:
-       logger.info("[SSX GHOST DRIVE] Not configured - DATABASE_CHANNEL_ID not set")
-   
-   # SSX ZERO-BUG: idle() now properly handles keyboard interrupt via signal handler
-   # The signal handler will flush database and exit gracefully
-   updater.idle()
+async def error(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Error handler - logs errors."""
+    logger.warning('Update "%s" caused error "%s"', update, context.error)
 
 
-logging.basicConfig(format='%(asctime)s - %(module)s.%(funcName)s - %(levelname)s - %(message)s', level=logging.INFO)
-logger = logging.getLogger(__name__)
-logging.getLogger('requests').setLevel(logging.CRITICAL)
-threadQ = Queue()  # This queue object put the spider function into the thread containor 
-                   # Using this thread containor wound also limits the download function thread
-                   # to prevent e-h to ban IP.
-(STATE) = range(1)
+async def status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """SSX Status Command - Display Ghost Drive and system status.
+    
+    Shows:
+    - Ghost Drive configuration status
+    - Last successful sync time
+    - Current userdata file size
+    - System uptime
+    """
+    # Check if user is admin
+    if update.message.from_user.id != generalcfg.adminID:
+        await update.message.reply_text("❌ Admin only command.")
+        return ConversationHandler.END
+    
+    status_lines = ["📊 **SSX System Status**\n"]
+    
+    # Ghost Drive Status
+    ghost_status = userdatastore.get_ghost_drive_status()
+    
+    status_lines.append("🗄️ **Ghost Drive**")
+    if ghost_status['is_configured']:
+        status_lines.append(f"✅ Configured (Channel: `{ghost_status['channel_id']}`)")
+    else:
+        status_lines.append("❌ Not configured - set `TG_DATABASE_CHANNEL_ID`")
+    
+    if ghost_status['last_sync_time']:
+        last_sync = ghost_status['last_sync_time'].strftime("%Y-%m-%d %H:%M:%S")
+        status_lines.append(f"📅 Last sync: `{last_sync}`")
+    else:
+        status_lines.append("📅 Last sync: Never")
+    
+    # File size
+    file_size = ghost_status['file_size']
+    if file_size > 0:
+        if file_size < 1024:
+            size_str = f"{file_size} bytes"
+        elif file_size < 1024 * 1024:
+            size_str = f"{file_size / 1024:.1f} KB"
+        else:
+            size_str = f"{file_size / (1024 * 1024):.1f} MB"
+        status_lines.append(f"📁 userdata size: `{size_str}`")
+    else:
+        status_lines.append("📁 userdata size: 0 bytes")
+    
+    status_lines.append("")
+    
+    # Uptime
+    uptime = time.time() - start_time
+    hours, remainder = divmod(int(uptime), 3600)
+    minutes, seconds = divmod(remainder, 60)
+    status_lines.append(f"⏱️ Uptime: `{hours}h {minutes}m {seconds}s`")
+    
+    status_text = "\n".join(status_lines)
+    await update.message.reply_text(status_text, parse_mode='Markdown')
+    
+    return ConversationHandler.END
+
+
+# =======================================================================
+# MAIN ENTRY POINT
+# =======================================================================
+
+async def post_init(application: Application) -> None:
+    """
+    SSX Post-Initialization Hook.
+    
+    Called after the application is built and initialized.
+    Performs Ghost Drive boot sequence.
+    """
+    global _bot_for_shutdown
+    _bot_for_shutdown = application.bot
+    
+    # =======================================================================
+    # SSX GHOST DRIVE - Boot Sequence
+    # =======================================================================
+    # Load the latest backup from the Telegram Vault.
+    # This ensures we have the most recent state from a previous instance.
+    # =======================================================================
+    if generalcfg.DATABASE_CHANNEL_ID:
+        logger.info("[SSX GHOST DRIVE] Attempting to load from Telegram Vault...")
+        
+        # Run sync function in executor to avoid blocking
+        loop = asyncio.get_event_loop()
+        success, message = await loop.run_in_executor(
+            None, userdatastore.load_from_ghost_drive, application.bot
+        )
+        
+        if success:
+            logger.info(f"[SSX GHOST DRIVE] {message}")
+        else:
+            if "first-time setup" in message.lower():
+                logger.info("[SSX GHOST DRIVE] First-time setup detected - initializing fresh database")
+                userdatastore.userfiledetect()
+            else:
+                logger.warning(f"[SSX GHOST DRIVE] Load failed: {message} - using local file")
+        
+        # Initialize the periodic Ghost Drive sync job (every 20 minutes)
+        ghost_job = application.job_queue.run_repeating(
+            lambda ctx: asyncio.create_task(_ghost_sync_job(ctx)),
+            interval=generalcfg.GHOST_DRIVE_SYNC_INTERVAL,
+            first=60
+        )
+        if ghost_job:
+            logger.info(f"[SSX GHOST DRIVE] Periodic sync job scheduled (interval: {generalcfg.GHOST_DRIVE_SYNC_INTERVAL}s)")
+    else:
+        logger.info("[SSX GHOST DRIVE] Not configured - DATABASE_CHANNEL_ID not set")
+
+
+async def _ghost_sync_job(context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Periodic Ghost Drive sync job wrapper."""
+    loop = asyncio.get_event_loop()
+    await loop.run_in_executor(
+        None, userdatastore.sync_to_ghost_drive, context.bot
+    )
+
+
+def main() -> None:
+    """Main entry point for the bot."""
+    # SSX ZERO-BUG: Register signal handlers for graceful shutdown
+    _register_signal_handlers()
+    
+    # Build the application (v20+ syntax)
+    builder = ApplicationBuilder()
+    
+    if generalcfg.token:
+        builder.token(generalcfg.token)
+    else:
+        logger.error("No bot token configured!")
+        sys.exit(1)
+    
+    if generalcfg.proxy:
+        builder.http_version("1.1")
+        builder.get_updates_proxy_url(generalcfg.proxy[0])
+    
+    application = builder.build()
+    
+    # Store bot reference for signal handler
+    global _bot_for_shutdown
+    _bot_for_shutdown = application.bot
+    
+    # Register post-init hook
+    application.post_init = post_init
+    
+    # Add conversation handler
+    conv_handler = ConversationHandler(
+        entry_points=[CommandHandler('start', start)],
+        states={
+            STATE: [MessageHandler(filters.TEXT & ~filters.COMMAND, state_handler)]
+        },
+        fallbacks=[CommandHandler('cancel', cancel)],
+    )
+    application.add_handler(conv_handler)
+    
+    # Add /status command handler
+    application.add_handler(CommandHandler('status', status))
+    
+    # Add error handler
+    application.add_error_handler(error)
+    
+    # Create recurring search job
+    application.job_queue.run_repeating(
+        searchIntervalCTL,
+        interval=generalcfg.interval,
+        first=5
+    )
+    
+    logger.info("Bot initiating...")
+    
+    # Run with polling (original behavior)
+    application.run_polling(
+        allowed_updates=Update.ALL_TYPES
+    )
+
 
 if __name__ == '__main__':
-   main()
+    logging.basicConfig(
+        format='%(asctime)s - %(module)s.%(funcName)s - %(levelname)s - %(message)s',
+        level=logging.INFO
+    )
+    logging.getLogger('requests').setLevel(logging.CRITICAL)
+    main()

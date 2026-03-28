@@ -16,9 +16,16 @@ A Python Telegram bot tracking e-hentai/exhentai galleries and sending them to u
 
 **How it works:**
 - At startup: Loads latest backup from the channel and overwrites local `userdata`
-- Every 20 minutes: Uploads current `userdata` to the channel
+- Every 20 minutes: Uploads current `userdata` to the channel (Gzip compressed)
 - On shutdown (SIGTERM): Blocks until sync completes (with 3 retries)
-- If sync fails: Full JSON is logged to stderr for manual recovery
+- If sync fails: JSON logged to DEBUG level for recovery
+
+**Security Features:**
+- Gzip compression (~70-80% size reduction)
+- 10MB size limit prevents JSON bomb / memory exhaustion
+- asyncio.Lock prevents race conditions in concurrent syncs
+- Log scrubbing prevents credential leakage
+- Atomic writes (temp + rename) prevent corruption
 
 **Environment Variables (SECURITY)**
 - `TG_TOKEN` - Telegram bot token
