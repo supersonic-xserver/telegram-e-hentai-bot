@@ -1,0 +1,13 @@
+# Core API & Networking
+python-telegram-bot>=20.0
+requests>=2.31.0
+httpx>=0.25.0
+
+# Proxy & Stealth Support
+requests[socks]
+httpx[socks]
+pysocks
+
+# Environment & Logic
+python-dotenv
+re-vendor  # Optional, but helps with regex complexing
