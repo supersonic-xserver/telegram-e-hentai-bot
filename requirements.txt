@@ -10,4 +10,3 @@ pysocks
 
 # Environment & Logic
 python-dotenv
-re-vendor  # Optional, but helps with regex complexing
