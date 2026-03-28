@@ -2,6 +2,28 @@
 """
 Telegram E-Hentai Bot - Python-Telegram-Bot v20+ Compatible
 
+SSX Namespace Fix: Ensure workspace root is in sys.path for Koyeb compatibility.
+"""
+
+# =======================================================================
+# SSX PATH INJECTION - Fix imports for Koyeb execution environment
+# =======================================================================
+import sys
+import os
+# Add the directory containing this script to sys.path
+_script_dir = os.path.dirname(os.path.abspath(__file__))
+if _script_dir not in sys.path:
+    sys.path.insert(0, _script_dir)
+# Also add parent directory (workspace root)
+_workspace_root = os.path.dirname(_script_dir)
+if _workspace_root not in sys.path:
+    sys.path.insert(0, _workspace_root)
+
+
+# =======================================================================
+# SSX BOT DESCRIPTION
+# =======================================================================
+"""
 SSX Zero-Bug Hardening:
 - Fully async/await architecture for v20+
 - SIGINT/SIGTERM signal handlers for graceful shutdown

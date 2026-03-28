@@ -1,6 +1,7 @@
 #!/usr/bin/python3
 
-from . import generalcfg
+# Explicit absolute import for compatibility with Koyeb execution environment
+from tgbotmodules.spidermodules import generalcfg
 import time
 import random
 
