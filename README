@@ -1,74 +1,131 @@
-TELEGRAM-E-HENTAI-BOT
+# TELEGRAM-E-HENTAI-BOT
 
-A python telegram bot tracking e-hentai/exhentai galleries and sending them to user as well as bot 
-admin's channel (if user allowed).
+A Python Telegram bot tracking e-hentai/exhentai galleries and sending them to users and channels.
 
-ATTENTION
+## SSX GHOST PROTOCOL - FEATURES
 
-This version would not support the previous userdata structure. Although I have provided a script 
-(userdataconver.py) to help bot admin to convert it, re-input this userdata is recommended.
+**Environment Variables (SECURITY)**
+- `TG_TOKEN` - Telegram bot token
+- `TG_ADMIN_ID` - Admin user ID (int)
+- `TG_PUB_CHANNEL_ID` - Broadcast channel ID
+- `TG_PASSCODE` - User verification passcode
+- `TG_PROXY` / `PROXY_URL` - SOCKS5/HTTP proxy support
 
-WHAT'S NEW
+**Stealth Mode (ENABLED BY DEFAULT)**
+- `ENABLE_STEALTH_MODE = True` - Rotating User-Agents + jitter delays
+- `JITTER_MIN = 0.5`, `JITTER_MAX = 2.0` - Human-like request delays
+- `PROXY_TIMEOUT = 10` - Prevents hanging on dead proxies
 
-1 The bot would exploit a stable multi-threading method to download the preview images significantly improving the 
-  efficiency.
-2 It now supports socks5 proxy.
-3 Optimized the format while sending the result. Now the connection between image, title, and URL is more clear.
+**Path & Volume Mapping (Koyeb Ready)**
+- `SSX_DATA_PATH` - Default `./data/`, override to `/app/data/` for Koyeb volumes
+- Auto-creates `user_data.json` and `downloads/` folder
 
- 
-MAJOR FEATURES
-1 This bot would utilize user created profiles to search e-hentai or exhentai, then send the result 
-  (including galleries' title, links and preview images(small or full image)) to users' chat and 
-  (if user allowed) bot admin's channel at a specified time cycle.
-2 It contains a step by step guide to help users to create their search profiles.
-3 The bot admin could control and alter both the bot's and the spider's process. Please read the
-  config file to gain more information.
-4 It supports HTTP/HTTPS/SOCKS5 proxies which are useful for the territory restricting the access to telegram 
-  and/or e-hentai. 
+**Safety Toggles (Dungeon Rules)**
+- `SSX_BLOCK_LOLI` - Block loli content (default: true)
+- `SSX_BLOCK_REAL_WORLD` - Block unethical real-world porn created by exploitation of the poor and gullable (default: true)
+- `SSX_BLOCK_AI` - Block AI-generated content that wasn't with human collaboration (default: true)
+- `SSX_SEARCH_INTERVAL = 1800` - Prevent aggressive scraping (30 min default)
 
-ENVIRONMENT AND PYTHON VERSION
-Tested OS: UBUNTU 16.04
-I have only tested this program on Ubuntu 16.04; deploy it on Ubuntu 14.04 might encounter some strange 
-UNICODE errors.
+## SETUP
 
-Python version: 3.5 or above
+1. Copy `.env.example` to `.env` and fill in your credentials
+2. Or set environment variables directly in your deployment platform
+3. Run `python tgexhbot_tg.py`
 
-PRE-REQUEST
-This program relies on several third-party python modules.
+## PYTHON VERSION
 
-requests   http://docs.python-requests.org
-python-telegram-bot   https://python-telegram-bot.readthedocs.io
+Requires Python 3.12.0 (see `.python-version`)
 
-BASIC USAGE FOR BOT ADMIN
+## DEPENDENCIES
 
-1. View the setup.sh/setup.bat based on OS to check the python's path, then run one of them to install 
-   all the required modules.
+```
+python-telegram-bot
+requests
+python-dotenv
+```
 
-2. Apply a bot at @BotFather on telegram. Then copy the token to token variable in 
-   tgbotmodules/spidermodules/generalcfg.py.
+---
 
-3. Create a private channel and add the bot created before as the admin. Then exploit some 
-   specified bots (like @getidsbot) to gain the channel ID. Once gained this ID, copy it to the 
-   pubChannelID variable in tgbotmodules/spidermodules/generalcfg.py.
+## THE JESTER-MAN'S CREED
 
-4. RECOMMENDATION-View the config file (generalcfg.py) to customize the bot's functions. 
+*Laugh and the glad world laughs with you;*
+*Weep and the sad world will sigh!*
+*Mirth is our life's true elixir;*
+*It shows you're a "regular guy."*
 
-5. Run tgexhbot_tg.py
+*There's nothing that so banishes worry,*
+*Nor puts such a big crimp in sin;*
+*Nor smoothes out the wrinkles of trouble,*
+*Like a jolly old Jester-man's grin!*
 
-6. Now exploit telegram to access your bot and add the search profiles.
+*It rolls off the years from your shoulders;*
+*You'll forget that you've grown to be men!*
+*Your youth turns once more to embrace you;*
+*For you've grown to be school boys again!*
 
+*So, if you've got grouches, don't bring 'em;*
+*It's your laugh and your joke that we need;*
+*For mirth is the doctor of trouble,*
+*And Laughter, the Jester-man's Creed!*
 
-If bot admin hopes to run this bot on servers' background, exploiting systemd to create a service is 
-recommended.
+---
 
-LICENSE: WTFPL
+## THE FOOL'S PRAYER
 
-Although I do not have a huge amount of time to maintain this repo, if you encounter any bug or have 
-any suggestion, please feel free to contact me. I would do my best to deal with them.
+*by Edward Rowland Sill (1841-1887)*
 
+The royal feast was done; the King
+Sought some new sport to banish care,
+And to his jester cried: "Sir Fool,
+Kneel now, and make for us a prayer!"
 
-Author's e-mail: saimonekurea[at]gmail.com
-Author's Telegram: https://t.me/egg0001
+The jester doffed his cap and bells,
+And stood the mocking court before;
+They could not see the bitter smile
+Behind the painted grin he wore.
 
+He bowed his head, and bent his knee
+Upon the monarch's silken stool;
+His pleading voice arose: "O Lord,
+Be merciful to me, a fool!
 
+"No pity, Lord, could change the heart
+From red with wrong to white as wool;
+The rod must heal the sin: but, Lord,
+Be merciful to me, a fool!
 
+"'Tis not by guilt the onward sweep
+Of truth and right, O Lord, we stay;
+'Tis by our follies that so long
+We hold the earth from heaven away.
+
+"These clumsy feet, still in the mire,
+Go crushing blossoms without end;
+These hard, well-meaning hands we thrust
+Among the heart-strings of a friend.
+
+"The ill-timed truth we might have kept —
+Who knows how sharp it pierced and stung?
+The word we had not sense to say —
+Who knows how grandly it had rung?
+
+"Our faults no tenderness should ask,
+The chastening stripes must cleanse them all;
+But for our blunders — oh, in shame
+Before the eyes of heaven we fall.
+
+"Earth bears no balsam for mistakes;
+Men crown the knave, and scourge the tool
+That did his will; but Thou, O Lord,
+Be merciful to me, a fool!"
+
+The room was hushed; in silence rose
+The King, and sought his gardens cool,
+And walked apart, and murmured low,
+"Be merciful to me, a fool!"
+
+---
+
+*RESIST THE ARCHONS WITH PURE MIRTH!*
+
+**LICENSE: WTFPL**
