@@ -21,8 +21,9 @@ import random
 import shlex
 import tempfile
 import sys
-from . import generalcfg
-from . import generator 
+# LAZY IMPORTS: Use shared_vars to break circular dependencies
+import tgbotmodules.spidermodules.shared_vars as generalcfg
+# Import generator lazily inside functions that need it
 from .theLogger import loggerGene
 
 

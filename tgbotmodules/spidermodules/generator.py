@@ -1,8 +1,7 @@
 #!/usr/bin/python3
 
-# Explicit absolute import for compatibility with Koyeb execution environment
-# Using direct module import to bypass package namespace issues
-import tgbotmodules.spidermodules.generalcfg as generalcfg
+# LAZY IMPORT: Use shared_vars (leaf module) to break circular dependencies
+import tgbotmodules.spidermodules.shared_vars as generalcfg
 import time
 import random
 
