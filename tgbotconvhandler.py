@@ -513,6 +513,19 @@ def spiderfunction(logger, spiderDict=None, chat_id=None):
        else: 
           # print (spiderDict)
           for sD in spiderDict:
+             # ===================================================================
+             # DICTIONARY TYPE-GUARD
+             # Fix AttributeError: spiderDict[sD] may be a string (keyword) 
+             # instead of a user settings dictionary when userdata is fresh/empty.
+             # Convert orphaned strings to proper settings dicts.
+             # ===================================================================
+             if isinstance(spiderDict[sD], str):
+                # Convert the orphaned string/keyword into a proper settings dict
+                keyword = spiderDict[sD]
+                spiderDict[sD] = {'keywords': [keyword]}
+                logger.info("Converted orphan keyword '%s' to settings dict", keyword)
+             
+             # Now spiderDict[sD] is guaranteed to be a dictionary
              spiderDict[sD].update({'userpubchenn': False, 'resultToChat': True})
        logger.info("Spider is initialing")
 
