@@ -311,6 +311,10 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     
     Clears previous user data and creates a new profile for the user.
     """
+    
+    logger.info(f"[SSX DEBUG] Received /start from {update.effective_user.id}")
+    await update.message.reply_text("SSX Terminal Active.")
+    
     context.user_data.clear()
     context.chat_data.clear()
     context.user_data.update({
