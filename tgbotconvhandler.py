@@ -706,7 +706,7 @@ def spiderfunction(logger, spiderDict=None, chat_id=None):
           tempChat_idList = []
           # Use .get() for safety to prevent KeyError if dict is malformed
           if spiderDict[sd].get('resultToChat') == True and spiderDict[sd].get('chat_id'):
-             tempChat_idList.append(spiderDict[sd]['chat_id'])
+             tempChat_idList.append(spiderDict[sd].get('chat_id'))
           # Use .get() for safety - prevent KeyError if dict is malformed
           if spiderDict[sd].get("userpubchenn") == True and generalcfg.pubChannelID:
              tempChat_idList.append(generalcfg.pubChannelID)
@@ -726,8 +726,8 @@ def spiderfunction(logger, spiderDict=None, chat_id=None):
              logger.info("Search user %s's information", str(sd))
              generator.Sleep.Havearest(sleep)
              searchopt = searchoptgen.searchgenerate(generateDict=spiderDict[sd])
-             cookies = spiderDict[sd]["usercookies"]
-             userResultStorePath = "./searchresult/{0}/{1}/".format(spiderDict[sd]["actualusername"], sd)
+             cookies = spiderDict[sd].get("usercookies")
+             userResultStorePath = "./searchresult/{0}/{1}/".format(spiderDict[sd].get("actualusername", sd), sd)
              imageObjList = exhspider.Spidercontrolasfunc(searchopt=searchopt, 
                                                           cookies=cookies, 
                                                           path=userResultStorePath,
@@ -761,7 +761,7 @@ def spiderfunction(logger, spiderDict=None, chat_id=None):
            # Try to get chat_id from spiderDict
            for sd in spiderDict:
                if spiderDict[sd].get('chat_id'):
-                   target_chat_id = spiderDict[sd]['chat_id']
+                   target_chat_id = spiderDict[sd].get('chat_id')
                    break
        
        if target_chat_id and _spider_bot:
