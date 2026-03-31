@@ -1,5 +1,5 @@
 # Core API & Networking
-python-telegram-bot>=20.0
+python-telegram-bot[job-queue]>=20.0
 requests>=2.31.0
 httpx>=0.25.0
 
