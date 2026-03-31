@@ -873,9 +873,9 @@ def main() -> None:
     # Add delay before polling to let Koyeb kill the previous instance's connection
     # This prevents "Conflict" loop from killing the new instance before it starts
     # ===================================================================
-    logger.info("[SSX BOOT] Waiting 30s for Koyeb to terminate old instance connections...")
+    logger.info("[SSX BOOT] Waiting 60s for Koyeb to terminate old instance connections...")
     import time
-    time.sleep(30)
+    time.sleep(60)
     logger.info("[SSX BOOT] Proceeding with polling...")
     
     # Graceful Exit - wrap polling in try/finally

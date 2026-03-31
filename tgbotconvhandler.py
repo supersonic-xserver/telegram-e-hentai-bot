@@ -126,15 +126,16 @@ def verify(inputStr, user_data, chat_data, logger, context=None):
               'actualusername': actusername,
               'state': 'ssx_active',
               'init': 'ssx_active',
-              'timestamp': time.time()
+              'timestamp': time.time(),
+              'userkey': user_data.get('userkey', '')
           }
           # ===================================================================
-          # SSX GHOST HUNT FIX - Explicitly set required keys for library lookups
-          # The Telegram library may access user_data['actualusername'] directly
-          # Setting these ensures the library never encounters a KeyError
+          # SSX ROOT CLEANUP - Remove orphan keys from root level
+          # The Spider sees root-level keys as "drawers" to crawl
+          # These fields belong INSIDE the profile, not at root
           # ===================================================================
-          user_data['actualusername'] = actusername
-          user_data['userkey'] = user_data.get('userkey', '')
+          user_data.pop('actualusername', None)
+          user_data.pop('userkey', None)
           logger.info(f"[SSX VERIFY] Profile created for {actusername} (key={actusername}, chat_id={chat_id})")
       
       # PERSIST PROFILE TO DISK - Save user_data to userdata.json
