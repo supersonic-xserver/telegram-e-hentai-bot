@@ -425,7 +425,7 @@ async def searcheh(bot, user_data, threadName: str = None, chat_id: int = None) 
         for ud in user_data:
             user_data[ud].update({'userpubchenn': False, 'resultToChat': True})
             logger.info("User %s has finished profile setting process, test search is beginning.", 
-                       user_data[ud]['actualusername'])
+                       user_data[ud].get('actualusername', ud))
         spiderDict = user_data
         toTelegramDict = spiderfunction(logger=logger, spiderDict=spiderDict)
     else:

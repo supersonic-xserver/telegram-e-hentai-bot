@@ -405,8 +405,10 @@ def advance(inputStr, user_data, chat_data, logger):
       outputTextProfileAmount = replytext.ProfileAmount.format(len(currentuserdata))
       outputTextList.append(outputTextProfileAmount)
       for cd in currentuserdata:
-         del currentuserdata[cd]['actualusername']
-         del currentuserdata[cd]['chat_id']
+         if 'actualusername' in currentuserdata[cd]:
+            del currentuserdata[cd]['actualusername']
+         if 'chat_id' in currentuserdata[cd]:
+            del currentuserdata[cd]['chat_id']
          outputTextProfileInfo = str(cd) + '\n' + str(currentuserdata[cd])
          outputTextList.append(outputTextProfileInfo)
       outputTextFuncSelect = replytext.FuncSelect
@@ -555,8 +557,10 @@ def advedit(inputStr, user_data, chat_data, logger):
       logger.info("User %s is going to edit %s", user_data.get('actualusername', 'unknown'), inputStr)
       tempuserdata = tempuserdata[inputStr]
       tempuserdata.update({"virtualusername": inputStr})
-      del tempuserdata["actualusername"]
-      del tempuserdata["chat_id"]
+      if 'actualusername' in tempuserdata:
+         del tempuserdata["actualusername"]
+      if 'chat_id' in tempuserdata:
+         del tempuserdata["chat_id"]
       outputTextRetriveProfileSuccess = replytext.RetriveProfileSuccess
       outputTextList.append(outputTextRetriveProfileSuccess)
       outputTextProfileContent = str(tempuserdata)
