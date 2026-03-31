@@ -603,11 +603,37 @@ def load_from_ghost_drive(bot: Any) -> Tuple[bool, str]:
             backup_source = {"document": document, "caption": f"Pinned backup (msg {msg_id})"}
             logger.info(f"[SSX GHOST DRIVE] Found pinned backup (msg {msg_id})")
         else:
-            logger.info(
-                "[SSX GHOST DRIVE] No pinned backup found. "
-                "Next sync will create and pin a new backup. Using local file."
+            logger.warning(
+                "[SSX GHOST DRIVE] No pinned backup found."
             )
-            return (False, "No Ghost Drive backup found - will create new backup on next sync")
+            
+            # ===================================================================
+            # FORCE NEW BACKUP CREATION
+            # If local userdata is empty or missing, force a new backup to be created
+            # This prevents the "scared to save" problem on first run
+            # ===================================================================
+            LOCAL_FILE = './userdata/userdata'
+            local_empty = True
+            
+            try:
+                if os.path.exists(LOCAL_FILE):
+                    file_size = os.path.getsize(LOCAL_FILE)
+                    if file_size > 10:  # More than just the init JSON
+                        local_empty = False
+            except Exception:
+                pass
+            
+            if local_empty:
+                logger.warning("[SSX GHOST DRIVE] Local file is empty - will force new backup creation on first sync")
+                # Initialize a minimal userdata file to prevent empty file issues
+                _atomic_write_json(LOCAL_FILE, {
+                    "init": "ssx_active",
+                    "timestamp": time.time(),
+                    "version": "2.0",
+                    "ghost_drive_init": True
+                })
+            
+            return (False, "No Ghost Drive backup found - will create new backup on first sync")
         
         # =================================================================
         # DOWNLOAD AND VALIDATE THE BACKUP

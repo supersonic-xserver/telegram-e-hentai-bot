@@ -417,7 +417,24 @@ async def searcheh(bot, user_data, threadName: str = None, chat_id: int = None) 
         toTelegramDict = spiderfunction(logger=logger, spiderDict=spiderDict)
     else:
         spiderDict = userdatastore.getspiderinfo()
-        toTelegramDict = spiderfunction(logger=logger)
+        
+        # ===================================================================
+        # RUNTIME FALLBACK WARNING
+        # If spiderDict is empty, log warning - user needs to set up profiles
+        # ===================================================================
+        if not spiderDict or len(spiderDict) == 0:
+            logger.warning("[SSX SEARCH] spiderDict is empty - no user profiles found in ./userdata/")
+            logger.warning("[SSX SEARCH] Users must complete /start profile setup before search will work")
+            if chat_id:
+                try:
+                    await bot.send_message(
+                        chat_id=chat_id,
+                        text="⚠️ No user profiles found. Please complete /start to set up your search profile."
+                    )
+                except Exception:
+                    pass
+        
+        toTelegramDict = spiderfunction(logger=logger, spiderDict=spiderDict, chat_id=chat_id)
         logger.info("All users' search has been completed, begin to send the result")
     
     if toTelegramDict:
@@ -716,12 +733,24 @@ async def _ghost_sync_job(context: ContextTypes.DEFAULT_TYPE) -> None:
 def main() -> None:
     """Main entry point for the bot."""
     # ===================================================================
-    # SUBAGENT 9.2: START KOYEB HEALTH CHECK SERVER
+    # LAZY DIRECTORY FIX - Ensure folders exist BEFORE anything else
+    # This prevents file system failures from killing the scheduler
+    # ===================================================================
+    try:
+        os.makedirs('./userdata', exist_ok=True)
+        os.makedirs('./searchresult', exist_ok=True)
+        os.makedirs('./data', exist_ok=True)
+        logger.info("[SSX BOOT] Directory structure ensured: ./userdata, ./searchresult, ./data")
+    except Exception as e:
+        logger.warning(f"[SSX BOOT] Could not create directories: {e}")
+    
+    # ===================================================================
+    # START KOYEB HEALTH CHECK SERVER
     # Must start BEFORE polling to respond to load balancer probes
     # ===================================================================
     health_thread = start_health_check_server(port=8000)
     
-    # SSX ZERO-BUG: Register signal handlers for graceful shutdown
+    # Register signal handlers for graceful shutdown
     _register_signal_handlers()
     
     # Build the application (v20+ syntax)
