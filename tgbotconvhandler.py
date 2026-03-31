@@ -487,55 +487,105 @@ def delete(inputStr, user_data, chat_data, logger):
 #    print (chat_data)
    return outputDict  
 
-def spiderfunction(logger, spiderDict=None):
+# Global bot reference for sending error messages
+_spider_bot = None
+
+def set_spider_bot(bot):
+    """Set the bot instance for error message delivery."""
+    global _spider_bot
+    _spider_bot = bot
+
+def spiderfunction(logger, spiderDict=None, chat_id=None):
    '''This function would either exploit the provided user information or the information on
       disk (if user information is not provided) to search the e-h/exh and return several 
       Manga objects. Every Manga object contains all of a gallery's information. This function
       would create a dict like {username1: MangaObjectList1, username2: MangaObjectList2} to 
       handle multiple users' result'''
-   if spiderDict == None:
-      spiderDict = userdatastore.getspiderinfo()
-   else: 
-      # print (spiderDict)
-      for sD in spiderDict:
-         spiderDict[sD].update({'userpubchenn': False, 'resultToChat': True})
-   logger.info("Spider is initialing")
+   
+   # =======================================================================
+   # MASSIVE TRY/EXCEPT ERROR TRAP
+   # Catches ALL exceptions and sends ERROR MESSAGE directly to user
+   # This prevents silent failures and tells you WHY it crashed
+   # =======================================================================
+   try:
+       if spiderDict == None:
+          spiderDict = userdatastore.getspiderinfo()
+       else: 
+          # print (spiderDict)
+          for sD in spiderDict:
+             spiderDict[sD].update({'userpubchenn': False, 'resultToChat': True})
+       logger.info("Spider is initialing")
 
-   toTelegramDict = {} 
-   sendUserResultDict = {} # Determin whether this user has chat_id and channel id to receive the result.
-                           # Otherwise the spider would not search this user's information.
-   sleep = generator.Sleep(sleepstr=generalcfg.searchInterval)
+       toTelegramDict = {} 
+       sendUserResultDict = {} # Determin whether this user has chat_id and channel id to receive the result.
+                               # Otherwise the spider would not search this user's information.
+       sleep = generator.Sleep(sleepstr=generalcfg.searchInterval)
 
-   for sd in spiderDict:
-      tempChat_idList = []
-      # print (spiderDict[sd]['resultToChat'])
-      if spiderDict[sd]['resultToChat'] == True and spiderDict[sd]['chat_id']:
-         tempChat_idList.append(spiderDict[sd]['chat_id'])
-      if spiderDict[sd]["userpubchenn"] == True and generalcfg.pubChannelID:
-         tempChat_idList.append(generalcfg.pubChannelID)
-      sendUserResultDict.update({sd: tempChat_idList})
-   for sd in sendUserResultDict: 
-      if sendUserResultDict[sd]:
-         logger.info("Search user %s's information", str(sd))
-         generator.Sleep.Havearest(sleep)
-         searchopt = searchoptgen.searchgenerate(generateDict=spiderDict[sd])
-         cookies = spiderDict[sd]["usercookies"]
-         userResultStorePath = "./searchresult/{0}/{1}/".format(spiderDict[sd]["actualusername"], sd)
-         imageObjList = exhspider.Spidercontrolasfunc(searchopt=searchopt, 
-                                                      cookies=cookies, 
-                                                      path=userResultStorePath,
-                                                      logger=logger,
-                                                      datastore=userdatastore.datastore,
-                                                      spiderDict=spiderDict,
-                                                      sd=sd
-                                                     ) 
-         logger.info("Search of user %s has completed.", str(sd))
+       for sd in spiderDict:
+          tempChat_idList = []
+          # print (spiderDict[sd]['resultToChat'])
+          if spiderDict[sd]['resultToChat'] == True and spiderDict[sd]['chat_id']:
+             tempChat_idList.append(spiderDict[sd]['chat_id'])
+          if spiderDict[sd]["userpubchenn"] == True and generalcfg.pubChannelID:
+             tempChat_idList.append(generalcfg.pubChannelID)
+          sendUserResultDict.update({sd: tempChat_idList})
+       for sd in sendUserResultDict: 
+          if sendUserResultDict[sd]:
+             logger.info("Search user %s's information", str(sd))
+             generator.Sleep.Havearest(sleep)
+             searchopt = searchoptgen.searchgenerate(generateDict=spiderDict[sd])
+             cookies = spiderDict[sd]["usercookies"]
+             userResultStorePath = "./searchresult/{0}/{1}/".format(spiderDict[sd]["actualusername"], sd)
+             imageObjList = exhspider.Spidercontrolasfunc(searchopt=searchopt, 
+                                                          cookies=cookies, 
+                                                          path=userResultStorePath,
+                                                          logger=logger,
+                                                          datastore=userdatastore.datastore,
+                                                          spiderDict=spiderDict,
+                                                          sd=sd
+                                                         ) 
+             logger.info("Search of user %s has completed.", str(sd))
 
-         if imageObjList:
-            toTelegramDict.update({sd: imageObjList})
-      else:
-         pass
-   return toTelegramDict
+             if imageObjList:
+                toTelegramDict.update({sd: imageObjList})
+          else:
+             pass
+       return toTelegramDict
+   
+   # =======================================================================
+   # ERROR HANDLER - Send crash details directly to user
+   # =======================================================================
+   except Exception as e:
+       import traceback
+       error_msg = f"🔴 SPIDER CRASH REPORT 🔴\n\n"
+       error_msg += f"Error: {type(e).__name__}: {str(e)}\n\n"
+       error_msg += f"Traceback:\n{traceback.format_exc()[:1000]}"
+       
+       logger.error(f"[SSX SPIDER CRASH] {error_msg}")
+       
+       # Try to send error message directly to user
+       target_chat_id = chat_id
+       if target_chat_id is None and spiderDict:
+           # Try to get chat_id from spiderDict
+           for sd in spiderDict:
+               if spiderDict[sd].get('chat_id'):
+                   target_chat_id = spiderDict[sd]['chat_id']
+                   break
+       
+       if target_chat_id and _spider_bot:
+           try:
+               import asyncio
+               loop = asyncio.new_event_loop()
+               asyncio.set_event_loop(loop)
+               loop.run_until_complete(_spider_bot.send_message(
+                   chat_id=target_chat_id,
+                   text=error_msg
+               ))
+               loop.close()
+           except Exception as notify_err:
+               logger.error(f"[SSX SPIDER] Failed to send crash notification: {notify_err}")
+       
+       return {}  # Return empty dict so bot continues running
 
 
 def messageanalyze(inputStr=None, user_data=None, chat_data=None, logger=None):

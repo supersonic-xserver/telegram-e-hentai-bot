@@ -30,6 +30,21 @@ from pathlib import Path
 from typing import Optional, Tuple, Any
 
 # =======================================================================
+# GLOBAL STATE FIX
+# Force working directory to /workspace to ensure relative paths like
+# ./userdata are resolved correctly (not to Heroku/Koyeb temp dirs)
+# =======================================================================
+try:
+    if os.path.exists('/workspace'):
+        os.chdir('/workspace')
+        print(f"[SSX DATASTORE] Changed working directory to /workspace")
+    elif os.path.exists('/app'):
+        os.chdir('/app')
+        print(f"[SSX DATASTORE] Changed working directory to /app")
+except Exception as e:
+    print(f"[SSX DATASTORE] Could not change working directory: {e}")
+
+# =======================================================================
 # SSX LOGGING SETUP - Security First
 # =======================================================================
 logger = logging.getLogger(__name__)
