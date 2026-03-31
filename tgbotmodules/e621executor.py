@@ -17,6 +17,7 @@ import asyncio
 import logging
 from datetime import datetime
 
+from telegram import Bot
 from telegram.error import TelegramError
 
 from tgbotmodules import userdatastore

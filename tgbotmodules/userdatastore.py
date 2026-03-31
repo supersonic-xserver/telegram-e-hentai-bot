@@ -785,8 +785,8 @@ def get_ghost_drive_status() -> dict:
 
 def append_mod_log(entry: dict) -> bool:
     """
-    Append moderation action to log.
-    Uses existing datastore() which auto-syncs to Ghost Drive.
+    Append moderation action to mod log JSONL file.
+    Thread-safe append to mod_log.jsonl in SSX_DATA_PATH.
     
     Args:
         entry: Dict with keys: timestamp, action, post_id, reasons, chat_id
@@ -794,10 +794,28 @@ def append_mod_log(entry: dict) -> bool:
     Returns:
         True if saved, False otherwise
     """
-    # Use existing datastore pattern - saves to userdata.json
-    # which gets synced to Ghost Drive automatically
-    result = datastore({"mod_logs": entry}, fromSpider=True)
-    return result.get('issaved', False)
+    import time
+    
+    # Get data path from generalcfg
+    data_path = os.environ.get("SSX_DATA_PATH", "./data/")
+    log_path = os.path.join(data_path, "mod_log.jsonl")
+    
+    # Ensure directory exists
+    os.makedirs(os.path.dirname(log_path), exist_ok=True)
+    
+    # Add timestamp if not present
+    if "timestamp" not in entry:
+        entry["timestamp"] = time.time()
+    
+    # Thread-safe append to JSONL file
+    with _userdata_lock:
+        try:
+            with open(log_path, "a", encoding="utf-8") as f:
+                f.write(json.dumps(entry) + "\n")
+            return True
+        except Exception as e:
+            logger.error("[mod_log] Write failed: %s", _safe_error_message(e))
+            return False
 
 
 def get_mod_logs(limit: int = 100) -> list:

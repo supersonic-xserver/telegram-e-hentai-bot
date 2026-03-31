@@ -15,13 +15,20 @@ SSX Dungeon Rules:
 """
 
 # =======================================================================
-# IMPORTS - Core SSX blacklists from safety_filter
+# ILLEGAL CONTENT BLACKLIST - Nuclear Tags (from safety_filter.py)
 # =======================================================================
-from tgbotmodules.safety_filter import SSX_BLOCKED_TAGS_DEFAULT
-
-# Create set for fast O(1) lookups
+# These tags indicate illegal/exploitative content and result in immediate deletion.
+# Sourced from safety_filter.py SSX_BLOCKED_TAGS_DEFAULT
 BLACKLIST_ILLEGAL: set[str] = {
-    tag.lower() for tag in SSX_BLOCKED_TAGS_DEFAULT
+    # Core illegal content
+    "loli", "shota", "young", "baby", "child", "children", "infant",
+    "toddler", "preteen", "minor", "minors", "underage", "under_age",
+    "underage", "under_age", " underage", "under_age",
+    # Incest variants
+    "incest", "mother", "father", "sister", "brother", "parent",
+    "son", "daughter", "aunt", "uncle", "niece", "nephew",
+    # Other illegal
+    "rape", "noncon", "dubcon", "forced", "coerced",
 }
 
 # =======================================================================
