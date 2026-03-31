@@ -856,31 +856,13 @@ def sync_to_ghost_drive(bot: Any) -> Tuple[bool, str]:
     """
     Sync current user data to the Ghost Drive (Telegram Channel backup).
     
-    Compresses the local user_data.json using Gzip and uploads it to the
-    configured DATABASE_CHANNEL_ID with a timestamped caption. Automatically
-    pins the backup message and cleans up old backups.
-    
-    SUBAGENT 2.2: After successful upload, pins the message so future loads
-    can use the efficient "Pinned Reference" strategy.
-    
-    Security Features:
-    - asyncio.Lock prevents race conditions from overlapping syncs
-    - Gzip compression (~70-80% size reduction)
-    - Exponential backoff on rate limit (429) errors
-    - DEBUG-level emergency logging (no stdout flooding)
-    - Atomic writes prevent corruption
-    - Specific exception handling (not bare Exception)
+    Added empty file safeguard to prevent uploading 0-byte files.
     
     Args:
         bot: The Telegram bot instance for API calls.
         
     Returns:
         Tuple of (success: bool, message: str)
-        
-    Example:
-        >>> success, msg = sync_to_ghost_drive(bot)
-        >>> if success:
-        ...     print(f"Backup saved: {msg}")
     """
     import requests as _requests
     
@@ -906,6 +888,11 @@ def sync_to_ghost_drive(bot: Any) -> Tuple[bool, str]:
             with open('./userdata/userdata', 'r') as f:
                 data = json.load(f)
         
+        # Empty file safeguard - prevent uploading 0-byte files
+        if not data or len(data) < 5:
+            logger.warning("[SSX GHOST] Data too small to sync. Skipping to prevent API crash.")
+            return (False, "Data too small or empty - sync aborted")
+        
         # Upload with compression and backoff
         # Now returns: (success, message, file_size, message_id)
         success, message, file_size, message_id = _upload_with_backoff(
@@ -914,7 +901,6 @@ def sync_to_ghost_drive(bot: Any) -> Tuple[bool, str]:
         
         if success:
             # =================================================================
-            # SUBAGENT 2.2: PIN THE BACKUP MESSAGE
             # After successful upload, pin it so load_from_ghost_drive can
             # use the efficient "Pinned Reference" strategy
             # =================================================================

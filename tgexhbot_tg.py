@@ -480,8 +480,32 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     return ConversationHandler.END
 
 
+# Track loop health
+_loop_healthy = True
+
 async def error(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Error handler - logs errors."""
+    """
+    Error handler - logs errors and handles loop health.
+    
+    Detects RuntimeError from event loop issues and logs
+    for recovery without crashing the dispatcher.
+    """
+    global _loop_healthy
+    
+    error_msg = str(context.error) if context.error else "Unknown error"
+    
+    # Detect event loop issues
+    if isinstance(context.error, RuntimeError) and 'event loop' in error_msg.lower():
+        _loop_healthy = False
+        logger.error(f"[SSX RECOVERY] Event loop issue detected: {error_msg}")
+        # DO NOT re-raise - let dispatcher continue processing
+        return
+    
+    # Mark loop as unhealthy if we hit loop-related issues
+    if 'closed' in error_msg.lower() or 'loop' in error_msg.lower():
+        _loop_healthy = False
+        logger.warning(f"[SSX LOOP] Loop health degraded: {error_msg}")
+    
     logger.warning('Update "%s" caused error "%s"', update, context.error)
 
 
@@ -627,6 +651,7 @@ def main() -> None:
     _register_signal_handlers()
     
     # Build the application (v20+ syntax)
+    # Configure job_defaults to prevent job piling that chokes the loop
     builder = ApplicationBuilder()
     
     if generalcfg.token:
@@ -638,6 +663,13 @@ def main() -> None:
     if generalcfg.proxy:
         builder.http_version("1.1")
         builder.get_updates_proxy_url(generalcfg.proxy[0])
+    
+    # Configure job scheduler to be resilient to background errors
+    builder.job_defaults(
+        misfire_grace_time=15,  # Allow 15s grace for missed jobs
+        coalesce=True,           # Combine multiple pending executions into one
+        max_instances=1          # Only one instance of each job at a time
+    )
     
     application = builder.build()
     
