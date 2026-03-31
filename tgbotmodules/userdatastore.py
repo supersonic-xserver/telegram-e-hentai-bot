@@ -877,8 +877,10 @@ def sync_to_ghost_drive(bot: Any) -> Tuple[bool, str]:
     """
     Sync current user data to the Ghost Drive (Telegram Channel backup).
     
-    Added Ghost Sync Shield - catches all exceptions
-    to prevent re-raising and poisoning the main loop.
+    Ghost Drive Shield:
+    - Guard clause at top: prevents 0-byte file sync at the source
+    - Isolated try/except: catches ALL exceptions without re-raising
+    - Never re-raises: prevents background task crashes from killing the main loop
     
     Args:
         bot: The Telegram bot instance for API calls.
@@ -895,21 +897,23 @@ def sync_to_ghost_drive(bot: Any) -> Tuple[bool, str]:
     
     global _last_ghost_sync_time
     
-    # Ghost Sync Shield - wrap entire function in try/except
-    # This prevents ANY exception from propagating back to the scheduler
+    # ===================================================================
+    # GUARD CLAUSE: Check for empty file BEFORE any sync operations
+    # This stops "File must be non-empty" errors at the source
+    # ===================================================================
+    LOCAL_FILE = './userdata/userdata'
+    if os.path.exists(LOCAL_FILE) and os.path.getsize(LOCAL_FILE) == 0:
+        logger.warning("[SSX GHOST] Local file is 0 bytes, skipping sync")
+        return (False, "Local file empty - cannot sync")
+    
+    # ===================================================================
+    # ISOLATION: Wrap entire sync logic in try/except Exception
+    # CRITICAL: Do NOT re-raise - logging only preserves the main loop
+    # Re-raising in a background task is what kills your event loop!
+    # ===================================================================
     try:
         if not _validate_channel_id(DATABASE_CHANNEL_ID):
             return (False, "Ghost Drive not configured or invalid channel ID")
-        
-        # Check for empty file BEFORE reading
-        userdata_path = './userdata/userdata'
-        try:
-            if os.path.exists(userdata_path) and os.path.getsize(userdata_path) == 0:
-                logger.warning("[SSX GHOST] Local file is 0 bytes, cannot sync")
-                return (False, "Local file empty - cannot sync")
-        except OSError as e:
-            logger.warning(f"[SSX GHOST] Cannot check file size: {e}")
-            return (False, "Cannot access local file")
         
         chat_id = int(DATABASE_CHANNEL_ID)
         
@@ -928,16 +932,12 @@ def sync_to_ghost_drive(bot: Any) -> Tuple[bool, str]:
             return (False, "Data too small or empty - sync aborted")
         
         # Upload with compression and backoff
-        # Now returns: (success, message, file_size, message_id)
         success, message, file_size, message_id = _upload_with_backoff(
             bot, chat_id, data, caption
         )
         
         if success:
-            # =================================================================
-            # After successful upload, pin it so load_from_ghost_drive can
-            # use the efficient "Pinned Reference" strategy
-            # =================================================================
+            # After successful upload, pin it for efficient "Pinned Reference" loading
             if message_id > 0:
                 _pin_backup_message(bot, chat_id, message_id)
             
@@ -950,9 +950,14 @@ def sync_to_ghost_drive(bot: Any) -> Tuple[bool, str]:
             return (True, f"Ghost Drive sync successful: {message}")
         else:
             return (False, f"Ghost Drive sync failed: {message}")
-            
+    
+    # ===================================================================
+    # ISOLATION: Catch ALL exceptions and log WITHOUT re-raising
+    # This is what prevents the background task from killing the main loop!
+    # ===================================================================
     except ValueError as e:
-        return (False, f"Invalid channel ID format: {_safe_error_message(e)}")
+        logger.error(f"[SSX GHOST DRIVE] Invalid channel ID format: {_safe_error_message(e)}")
+        return (False, f"Ghost Drive sync failed: invalid configuration")
     except _requests.RequestException as e:
         logger.warning(f"[SSX GHOST DRIVE] Network error during sync: {_safe_error_message(e)}")
         return (False, f"Ghost Drive sync failed: network error")
@@ -962,6 +967,11 @@ def sync_to_ghost_drive(bot: Any) -> Tuple[bool, str]:
     except OSError as e:
         logger.error(f"[SSX GHOST DRIVE] File system error: {_safe_error_message(e)}")
         return (False, f"Ghost Drive sync failed: file system error")
+    except Exception as e:
+        # CATCH-ALL: Log any unexpected error without re-raising
+        # This is the CRITICAL line that prevents event loop suicide
+        logger.error(f"[SSX GHOST DRIVE] Unexpected error (loop preserved): {_safe_error_message(e)}")
+        return (False, f"Ghost Drive sync failed: {type(e).__name__}")
 
 
 def _cleanup_old_backups(
