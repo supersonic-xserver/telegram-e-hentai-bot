@@ -46,6 +46,17 @@ def verify(inputStr, user_data, chat_data, logger, context=None):
           "end_conversation": True  # Signal to end conversation
       }
    
+   # ===================================================================
+   # SSX LIBRARY HANDSHAKE - Set actualusername at very beginning
+   # Satisfy Telegram library requirements before any other logic
+   # This prevents KeyError warnings during handoff
+   # ===================================================================
+   if 'actualusername' not in user_data:
+       # Try to get from user_id lookup or use chat_id as fallback
+       _temp_username = user_data.get('actualusername') or str(user_data.get('chat_id', ''))
+       if _temp_username:
+           user_data['actualusername'] = _temp_username
+   
    # Now we can safely access user_data as a dict
    admin_id = os.environ.get("TG_ADMIN_ID", "").strip()
    user_id = user_data.get('user_id', '')

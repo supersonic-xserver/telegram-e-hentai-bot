@@ -312,19 +312,25 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     
     Clears previous user data and creates a new profile for the user.
     """
+    # ===================================================================
+    # SSX EDIT-AWARE MESSAGE GETTER - Handle both new and edited messages
+    # ===================================================================
+    msg = update.message or update.edited_message
+    if not msg:
+        return ConversationHandler.END
     
     logger.info(f"[SSX DEBUG] Received /start from {update.effective_user.id}")
-    await update.message.reply_text("SSX Terminal Active.")
+    await msg.reply_text("SSX Terminal Active.")
     
     context.user_data.clear()
     context.chat_data.clear()
     context.user_data.update({
-        "actualusername": str(update.message.from_user.username),
-        "chat_id": update.message.chat_id,
+        "actualusername": str(msg.from_user.username),
+        "chat_id": msg.chat_id,
         "user_id": update.effective_user.id  # For admin bypass verification
     })
-    logger.info("Actual username is %s.", str(update.message.from_user.username))
-    await update.message.reply_text(text=replytext.startMessage)
+    logger.info("Actual username is %s.", str(msg.from_user.username))
+    await msg.reply_text(text=replytext.startMessage)
     context.chat_data.update({'state': 'verify'})
     return STATE
 
@@ -336,13 +342,20 @@ async def state_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
     Receives user input, analyzes it, and manages the conversation flow.
     Creates search threads when user completes profile settings.
     """
-    # SSX SHUTDOWN CHECK: Don't start new operations if shutting down
-    if is_shutdown_requested():
-        logger.warning("Shutdown requested, ignoring new message from %s", update.message.from_user.username)
+    # ===================================================================
+    # SSX EDIT-AWARE MESSAGE GETTER - Handle both new and edited messages
+    # ===================================================================
+    msg = update.message or update.edited_message
+    if not msg:
         return ConversationHandler.END
     
-    inputStr = update.message.text
-    context.user_data.update({'chat_id': update.message.chat_id})
+    # SSX SHUTDOWN CHECK: Don't start new operations if shutting down
+    if is_shutdown_requested():
+        logger.warning("Shutdown requested, ignoring new message from %s", msg.from_user.username)
+        return ConversationHandler.END
+    
+    inputStr = msg.text
+    context.user_data.update({'chat_id': msg.chat_id})
     
     # Pass context to messageanalyze for nuclear state clearing support
     outputDict = messageanalyze(
@@ -359,14 +372,14 @@ async def state_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
         context.user_data.clear()
         context.chat_data.clear()
         for text in outputDict["outputTextList"]:
-            await update.message.reply_text(text=text)
+            await msg.reply_text(text=text)
         return ConversationHandler.END
     
     context.user_data.update(outputDict["outputUser_data"])
     context.chat_data.update(outputDict["outputChat_data"])
     
     for text in outputDict["outputTextList"]:
-        await update.message.reply_text(text=text)
+        await msg.reply_text(text=text)
     
     if context.chat_data['state'] != 'END':
         return STATE
@@ -385,7 +398,7 @@ async def state_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
         
         context.user_data.clear()
         context.chat_data.clear()
-        logger.info("The user_data and chat_data of user %s is clear.", str(update.message.from_user.username))
+        logger.info("The user_data and chat_data of user %s is clear.", str(msg.from_user.username))
         return ConversationHandler.END
 
 
@@ -505,12 +518,19 @@ async def autoCreateJob(application: Application) -> None:
 
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Cancel command handler - clears user data."""
-    await update.message.reply_text(text=replytext.UserCancel)
-    logger.info("User %s has canceled the process.", str(update.message.from_user.username))
+    # ===================================================================
+    # SSX EDIT-AWARE MESSAGE GETTER - Handle both new and edited messages
+    # ===================================================================
+    msg = update.message or update.edited_message
+    if not msg:
+        return ConversationHandler.END
+    
+    await msg.reply_text(text=replytext.UserCancel)
+    logger.info("User %s has canceled the process.", str(msg.from_user.username))
     context.user_data.clear()
     context.chat_data.clear()
     logger.info("The user_data and chat_data of user %s has cleared", 
-               str(update.message.from_user.username))
+               str(msg.from_user.username))
     return ConversationHandler.END
 
 
