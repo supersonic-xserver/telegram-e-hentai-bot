@@ -898,6 +898,12 @@ def sync_to_ghost_drive(bot: Any) -> Tuple[bool, str]:
     global _last_ghost_sync_time
     
     # ===================================================================
+    # DIRECTORY PERSISTENCE
+    # Ensure userdata directory exists on Koyeb ephemeral volume
+    # ===================================================================
+    os.makedirs('./userdata', exist_ok=True)
+    
+    # ===================================================================
     # GUARD CLAUSE: Check for empty file BEFORE any sync operations
     # This stops "File must be non-empty" errors at the source
     # ===================================================================

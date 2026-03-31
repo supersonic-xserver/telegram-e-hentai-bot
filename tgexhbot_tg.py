@@ -578,21 +578,40 @@ async def search(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     This command bypasses the ConversationHandler to directly trigger
     the search function. Useful after redeploys when ConversationHandler
     state might be stale.
+    
+    Usage:
+    /search - Search all users normally
+    /search force - Force search ignoring "already seen" cache
     """
     logger.info(f"[SSX DEBUG] Received /search from {update.effective_user.id}")
+    
+    # Check for force flag
+    force_search = False
+    args = context.args if hasattr(context, 'args') else []
+    if args and args[0].lower() == 'force':
+        force_search = True
+        logger.info("[SSX DEBUG] Force search flag detected - ignoring cache")
     
     # Clear any stale conversation state
     context.user_data.clear()
     context.chat_data.clear()
     
-    await update.message.reply_text("🔍 SSX Search initiated...")
+    # Get the user's chat_id for direct result routing
+    user_chat_id = update.effective_chat.id
     
-    # Trigger search in background
+    # Context Routing - pass chat_id to searcheh
+    
+    await update.message.reply_text("🔍 SSX Search initiated...")
+    if force_search:
+        await update.message.reply_text("⚡ Force mode: ignoring cache, sending all results!")
+    
+    # Trigger search in background with user's chat_id
     context.application.create_task(
         searcheh(
             context.bot,
             None,  # None = search all users
-            threadName=f"manual_{time.time()}"
+            threadName=f"manual_{time.time()}",
+            chat_id=user_chat_id  # Route results to user's chat
         )
     )
     
