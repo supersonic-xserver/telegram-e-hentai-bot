@@ -50,11 +50,11 @@ def searchgenerate(generateDict):
    #    generateDict['usercate'].remove('non-h')
    #    generateDict['usercate'].append('non_h')
 #    print (generateDict['usercate'])
-   for gd in generateDict['usercate']:
+   for gd in generateDict.get('usercate', []):
       searchopt.__setattr__(gd, True)
-   searchopt.pages = generateDict["userranges"]
+   searchopt.pages = generateDict.get("userranges", 5)
    searchopt.pagefilteroff = True
-   if generateDict["usercookies"] == None:
+   if generateDict.get("usercookies") == None:
       searchopt.eh = True
    else:
       searchopt.eh = False

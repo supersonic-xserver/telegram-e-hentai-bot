@@ -141,13 +141,13 @@ def verify(inputStr, user_data, chat_data, logger, context=None):
           except Exception as e:
               logger.error(f"[SSX VERIFY] Failed to persist profile: {e}")
       
-      logger.info("Identity of %s verified", user_data['actualusername'])
+      logger.info("Identity of %s verified", user_data.get('actualusername', 'unknown'))
       chat_data.update({"fromadvcreate": False, "fromedit": False, "fromguide": False})
-      currentuserdata = userdatastore.dataretrive(actusername=user_data['actualusername'])
+      currentuserdata = userdatastore.dataretrive(actusername=user_data.get('actualusername', 'unknown'))
       outputTextGeneralInfo = replytext.GeneralInfo.format(len(currentuserdata), generalcfg.maxiumprofile)
       outputTextList.append(outputTextGeneralInfo)
       if len(currentuserdata) >= generalcfg.maxiumprofile:
-         logger.info("User %s has %d profile(s), excess or equal to the maxium profiles limitation.", user_data['actualusername'], len(currentuserdata))
+         logger.info("User %s has %d profile(s), excess or equal to the maxium profiles limitation.", user_data.get('actualusername', 'unknown'), len(currentuserdata))
          outputTextProfileExcessVerify = replytext.ProfileExcessVerify.format(generalcfg.maxiumprofile) 
          outputTextList.append(outputTextProfileExcessVerify)
          chat_data.update({'profileover': True, 'state': 'advance'})
@@ -158,7 +158,7 @@ def verify(inputStr, user_data, chat_data, logger, context=None):
    else:
       outputTextVerifyFail = replytext.VerifyFail
       outputTextList.append(outputTextVerifyFail)
-      logger.error("Identity of %s could not be verified", user_data['actualusername']) 
+      logger.error("Identity of %s could not be verified", user_data.get('actualusername', 'unknown')) 
       chat_data.update({'state': 'verify'}) 
    outputDict = {"outputTextList": outputTextList,
                  "outputChat_data": chat_data, 
@@ -176,12 +176,12 @@ def usercookies(inputStr, user_data, chat_data, logger):
       try:
          cookies = literal_eval(inputStr)
       except (SyntaxError, TypeError, ValueError):
-         logger.error("The INCORRECT cookies of user %s is %s.", user_data['actualusername'], inputStr)
+         logger.error("The INCORRECT cookies of user %s is %s.", user_data.get('actualusername', 'unknown'), inputStr)
          outputTextCookiesError = replytext.CookiesError
          outputTextList.append(outputTextCookiesError)
          chat_data.update({'state': 'usercookies'})
       else:
-         logger.info("The cookies of user %s is %s.", user_data['actualusername'], str(cookies))
+         logger.info("The cookies of user %s is %s.", user_data.get('actualusername', 'unknown'), str(cookies))
          outputTextToUserKey = replytext.ToUserKey
          outputTextList.append(outputTextToUserKey)
          user_data.update({'usercookies': cookies})
@@ -197,7 +197,7 @@ def usercookies(inputStr, user_data, chat_data, logger):
 def userkey(inputStr, user_data, chat_data, logger):
    outputTextList = []
    if inputStr == 'RETURN':
-      logger.info("User %s has returned to usercookies.", user_data['actualusername'])
+      logger.info("User %s has returned to usercookies.", user_data.get('actualusername', 'unknown'))
       outputTextReturnToCookies = replytext.ReturnToCookies 
       outputTextList.append(outputTextReturnToCookies)
       chat_data.update({'state': 'usercookies'})
@@ -205,10 +205,10 @@ def userkey(inputStr, user_data, chat_data, logger):
       chat_data.update({'state': 'userranges'})
       if inputStr == 'EMPTY':
          user_data.update({"userkey": ""})
-         logger.info("The search key of user %s is empty.", user_data['actualusername'])
+         logger.info("The search key of user %s is empty.", user_data.get('actualusername', 'unknown'))
       else:
          user_data.update({"userkey": inputStr,})
-         logger.info("The search key of user %s is %s.", user_data['actualusername'], inputStr)
+         logger.info("The search key of user %s is %s.", user_data.get('actualusername', 'unknown'), inputStr)
       outputTextToUserRange = replytext.ToUserRange
       outputTextList.append(outputTextToUserRange)
    outputDict = {"outputTextList": outputTextList,
@@ -222,7 +222,7 @@ def userkey(inputStr, user_data, chat_data, logger):
 def userranges(inputStr, user_data, chat_data, logger):
    outputTextList = []
    if inputStr == 'RETURN':
-      logger.info("User %s has returned to usercookies.", user_data['actualusername'])
+      logger.info("User %s has returned to usercookies.", user_data.get('actualusername', 'unknown'))
       outputTextReturnToKey = replytext.ReturnToKey
       outputTextList.append(outputTextReturnToKey)
       chat_data.update({'state': 'userkey'})
@@ -230,7 +230,7 @@ def userranges(inputStr, user_data, chat_data, logger):
       try:
          ranges = int(inputStr)
       except ValueError:
-         logger.info("The INCORRECT input of user %s is %s.", user_data['actualusername'], inputStr)
+         logger.info("The INCORRECT input of user %s is %s.", user_data.get('actualusername', 'unknown'), inputStr)
          outputTextRangeError = replytext.RangeError
          outputTextList.append(outputTextRangeError)
          chat_data.update({'state': 'userranges'})
@@ -241,7 +241,7 @@ def userranges(inputStr, user_data, chat_data, logger):
         outputTextToUserCate = replytext.ToUserCate
         outputTextList.append(outputTextToUserCate)
         chat_data.update({'state': 'usercate'})
-        logger.info("The search range of user %s is %s.", user_data['actualusername'], str(ranges))
+        logger.info("The search range of user %s is %s.", user_data.get('actualusername', 'unknown'), str(ranges))
    outputDict = {"outputTextList": outputTextList,
                  "outputChat_data": chat_data, 
                  "outputUser_data": user_data
@@ -253,7 +253,7 @@ def userranges(inputStr, user_data, chat_data, logger):
 def usercate(inputStr, user_data, chat_data, logger):
    outputTextList = []
    if inputStr == 'RETURN':
-      logger.info("User %s has returned to userranges.", user_data['actualusername'])
+      logger.info("User %s has returned to userranges.", user_data.get('actualusername', 'unknown'))
       outputTextReturnToRange = replytext.ReturnToRange
       outputTextList.append(outputTextReturnToRange)
       chat_data.update({'state': 'userranges'})
@@ -263,11 +263,11 @@ def usercate(inputStr, user_data, chat_data, logger):
       if set(catelist).issubset(catechecklist) == True:
          user_data.update({'usercate': catelist})
          chat_data.update({'state': 'userresult'})
-         logger.info("The correct search categories of user %s are %s.", user_data['actualusername'], inputStr)
+         logger.info("The correct search categories of user %s are %s.", user_data.get('actualusername', 'unknown'), inputStr)
          outputTextList.append(replytext.ToUserResult.format((int(generalcfg.interval)/3600)))
       else:
          chat_data.update({'state': 'usercate'})
-         logger.info("The INCORRECT search categories of user %s are %s, return to usercate", user_data['actualusername'], inputStr)
+         logger.info("The INCORRECT search categories of user %s are %s, return to usercate", user_data.get('actualusername', 'unknown'), inputStr)
          outputTextCateError = replytext.CateError
          outputTextList.append(outputTextCateError)
    outputDict = {"outputTextList": outputTextList,
@@ -281,28 +281,28 @@ def usercate(inputStr, user_data, chat_data, logger):
 def userresult(inputStr, user_data, chat_data, logger):
    outputTextList = []
    if inputStr == 'RETURN':
-      logger.info("User %s has returned to usercate.", user_data['actualusername'])
+      logger.info("User %s has returned to usercate.", user_data.get('actualusername', 'unknown'))
       outputTextReturnToCate = replytext.ReturnToCate
       outputTextList.append(outputTextReturnToCate)
       chat_data.update({'state': 'usercate'})
    elif inputStr == 1 or inputStr == "1":
       user_data.update({"resultToChat": True, "userpubchenn": False})
-      logger.info("User %s would receive his/her result in the chat.", user_data['actualusername'])
+      logger.info("User %s would receive his/her result in the chat.", user_data.get('actualusername', 'unknown'))
       chat_data.update({'state': 'username'})
       outputTextList.append(replytext.ToVirtualUsername)
    elif inputStr == 2 or inputStr == "2":
       user_data.update({"resultToChat": False, "userpubchenn": True})
-      logger.info("User %s would receive his/her result in the public channel.", user_data['actualusername'])
+      logger.info("User %s would receive his/her result in the public channel.", user_data.get('actualusername', 'unknown'))
       chat_data.update({'state': 'username'})
       outputTextList.append(replytext.ToVirtualUsername)
    elif inputStr == 3 or inputStr == "3":
       user_data.update({"resultToChat": True, "userpubchenn": True})
-      logger.info("User %s would receive his/her result in both the chat and public channel.", user_data['actualusername'])   
+      logger.info("User %s would receive his/her result in both the chat and public channel.", user_data.get('actualusername', 'unknown'))   
       chat_data.update({'state': 'username'})
       outputTextList.append(replytext.ToVirtualUsername)
    else:
       logger.info("User %s's wrong input is %s",
-                   user_data['actualusername'],
+                   user_data.get('actualusername', 'unknown'),
                    inputStr)
       outputTextList.append(replytext.ChoiceError)
       chat_data.update({'state': 'userresult'})
@@ -317,13 +317,13 @@ def userresult(inputStr, user_data, chat_data, logger):
 def username(inputStr, user_data, chat_data, logger):
    outputTextList = []
    if inputStr == 'RETURN':
-      logger.info("User %s has returned to userpubchenn.", user_data['actualusername'])
+      logger.info("User %s has returned to userpubchenn.", user_data.get('actualusername', 'unknown'))
       outputTextList.append(replytext.ReturnToUserResult)
       chat_data.update({'state': 'userresult'})
    else:
       chat_data.update({'state': 'storeinfo', "fromadvcreate": False, "fromedit": False, "fromguide": True})
       user_data.update({"virtualusername": inputStr})
-      logger.info("Virual username of %s is %s.", user_data['actualusername'], inputStr)
+      logger.info("Virual username of %s is %s.", user_data.get('actualusername', 'unknown'), inputStr)
       outputTextToStoreInfo = replytext.ToStoreInfo 
       outputTextList.append(outputTextToStoreInfo)
       del user_data['chat_id']
@@ -354,31 +354,31 @@ def storeinfo(inputStr, user_data, chat_data, logger):
          userdatastore.datadelete(chat_data["oldvirusername"])
       IOreportdict = userdatastore.datastore(userdict=userdata)
       if IOreportdict['issaved'] == IOreportdict['nosamename'] == True:
-         logger.info("The information of user %s is saved.", user_data['actualusername'])
+         logger.info("The information of user %s is saved.", user_data.get('actualusername', 'unknown'))
          outputTextStored = replytext.Stored 
          outputTextList.append(outputTextStored)
          
          chat_data.update({'state': 'END'})
       else:
-         logger.error("The information of user %s is NOT saved due to IO issue or name issue.", user_data['actualusername'])
+         logger.error("The information of user %s is NOT saved due to IO issue or name issue.", user_data.get('actualusername', 'unknown'))
          chat_data.update({'state': 'username'})
          outputTextStoreError = replytext.StoreError
          outputTextList.append(outputTextStoreError)
          if chat_data["fromguide"] == True:
             chat_data.update({'state': 'username'})
-            logger.error("User %s has returned to username.", user_data['actualusername'])
+            logger.error("User %s has returned to username.", user_data.get('actualusername', 'unknown'))
          else:
            chat_data.update({'state': 'advcreate'})
-           logger.error("User %s has returned to advcreate.", user_data['actualusername'])
+           logger.error("User %s has returned to advcreate.", user_data.get('actualusername', 'unknown'))
    else: 
       if chat_data["fromguide"] == True:
-         logger.info("The information of user %s is not saved due to user cancel, return to virtual username.", user_data['actualusername'])
+         logger.info("The information of user %s is not saved due to user cancel, return to virtual username.", user_data.get('actualusername', 'unknown'))
          outputTextReturnToVirtualUsername = replytext.ReturnToVirtualUsername
          outputTextList.append(outputTextReturnToVirtualUsername)
          chat_data.update({'state': "username"})
       else: 
          chat_data.update({'state': 'advcreate'})
-         logger.info("The information of user %s is not saved due to user cancel, return to advcreate.", user_data['actualusername'])
+         logger.info("The information of user %s is not saved due to user cancel, return to advcreate.", user_data.get('actualusername', 'unknown'))
          outputTextReturnToAdvCreate = replytext.ReturnToAdvCreate
          outputTextList.append(outputTextReturnToAdvCreate)
    outputDict = {"outputTextList": outputTextList,
@@ -393,7 +393,7 @@ def advance(inputStr, user_data, chat_data, logger):
    outputTextList = []
    if inputStr == 'INFO':
       chat_data.update({'state': 'advguide'})
-      logger.info("User %s entered advance mode", user_data['actualusername'])
+      logger.info("User %s entered advance mode", user_data.get('actualusername', 'unknown'))
       statusdict = userdatastore.userfiledetect()
       if statusdict['isfile'] == False:
          logger.error("Missied userdata, created new one at advance.")
@@ -401,7 +401,7 @@ def advance(inputStr, user_data, chat_data, logger):
          logger.error("Userdata is corrupted, backuped and created new one at advance.")
       else:
          logger.info("Userdata checked at advance.")
-      currentuserdata = userdatastore.dataretrive(actusername=user_data['actualusername'])
+      currentuserdata = userdatastore.dataretrive(actusername=user_data.get('actualusername', 'unknown'))
       outputTextProfileAmount = replytext.ProfileAmount.format(len(currentuserdata))
       outputTextList.append(outputTextProfileAmount)
       for cd in currentuserdata:
@@ -425,8 +425,8 @@ def advance(inputStr, user_data, chat_data, logger):
 
 def advguide(inputStr, user_data, chat_data, logger):
    outputTextList = []
-   currentuserdata = userdatastore.dataretrive(actusername=user_data['actualusername'])
-   logger.info("User %s entered advguide", user_data['actualusername'])
+   currentuserdata = userdatastore.dataretrive(actusername=user_data.get('actualusername', 'unknown'))
+   logger.info("User %s entered advguide", user_data.get('actualusername', 'unknown'))
    if inputStr == 'ADVCREATE':
       statusdict = userdatastore.userfiledetect()
       if statusdict['isfile'] == False:
@@ -437,7 +437,7 @@ def advguide(inputStr, user_data, chat_data, logger):
          logger.info("Userdata checked at advguide.")
       if 'profileover' in chat_data:
          logger.info("User %s already has %d profile(s) so could not create new one.", 
-                     user_data['actualusername'], 
+                     user_data.get('actualusername', 'unknown'), 
                      len(currentuserdata)
                      )
          outputTextProfileExcess = replytext.ProfileExcess
@@ -450,7 +450,7 @@ def advguide(inputStr, user_data, chat_data, logger):
    elif inputStr == 'ADVEDIT':
       if len(currentuserdata) == 0:
          chat_data.update({'state': 'advguide'})
-         logger.info("User %s does not has any profile", user_data['actualusername'])
+         logger.info("User %s does not has any profile", user_data.get('actualusername', 'unknown'))
          outputTextNoProfile = replytext.NoProfile
          outputTextList.append(outputTextNoProfile)
       else:
@@ -480,55 +480,55 @@ def advguide(inputStr, user_data, chat_data, logger):
 
 def advcreate(inputStr, user_data, chat_data, logger):
    outputTextList = []
-   logger.info("User %s has entered advcreate.", user_data['actualusername'])
+   logger.info("User %s has entered advcreate.", user_data.get('actualusername', 'unknown'))
    try:
       tempuserdata = literal_eval(inputStr)
    except (SyntaxError, TypeError, ValueError):
       chat_data.update({'state': 'advcreate'})
       outputTextErrorSyntax = replytext. ErrorSyntax
       outputTextList.append(outputTextErrorSyntax)
-      logger.info("The INCORRECT profile of user %s is %s, return to advcreate", user_data['actualusername'], inputStr)
+      logger.info("The INCORRECT profile of user %s is %s, return to advcreate", user_data.get('actualusername', 'unknown'), inputStr)
    else:
       userdatachecklist = ['usercate', 'userranges', 'userkey', 'resultToChat', 'userpubchenn', 'virtualusername', 'usercookies']
       catechecklist = ['doujinshi', 'manga', 'artistcg', 'gamecg', 'western', 'non-h', 'imageset', 'asianporn', 'misc', 'cosplay']
       if set(userdatachecklist) != set(list(tempuserdata.keys())):       
-         logger.info("The INCORRECT userdata key of user %s is %s, return to advcreate", user_data['actualusername'], str(tempuserdata.keys()))
+         logger.info("The INCORRECT userdata key of user %s is %s, return to advcreate", user_data.get('actualusername', 'unknown'), str(tempuserdata.keys()))
          chat_data.update({'state': 'advcreate'})
          outputTextUserDataCheckFail = replytext.UserDataCheckFail
          outputTextList.append(outputTextUserDataCheckFail)
 
       elif type(tempuserdata['usercate']) != list:
-         logger.info("The INCORRECT usercate type of user %s is %s, return to advcreate", user_data['actualusername'], str(type(tempuserdata['usercate']))) 
+         logger.info("The INCORRECT usercate type of user %s is %s, return to advcreate", user_data.get('actualusername', 'unknown'), str(type(tempuserdata['usercate']))) 
          chat_data.update({'state': 'advcreate'})
          outputTextUserCateSyntaxError = replytext.UserCateSyntaxError
          outputTextList.append(outputTextUserCateSyntaxError)
 
       elif set(tempuserdata['usercate']).issubset(catechecklist) == False:
-         logger.info("The INCORRECT usercate categories of user %s is %s, return to advcreate", user_data['actualusername'], str(tempuserdata['usercate'])) 
+         logger.info("The INCORRECT usercate categories of user %s is %s, return to advcreate", user_data.get('actualusername', 'unknown'), str(tempuserdata['usercate'])) 
          chat_data.update({'state': 'advcreate'})
          outputTextUserCateCheckFail = replytext.UserCateCheckFail
          outputTextList.append(outputTextUserCateCheckFail)
 
       elif type(tempuserdata["userranges"]) != int:
-         logger.info("The INCORRECT userranges type of user %s is %s, return to advcreate", user_data['actualusername'], str(type(tempuserdata["userranges"]))) 
+         logger.info("The INCORRECT userranges type of user %s is %s, return to advcreate", user_data.get('actualusername', 'unknown'), str(type(tempuserdata["userranges"]))) 
          chat_data.update({'state': 'advcreate'})
          outputTextUserRangesValueError = replytext.UserRangesValueError
          outputTextList.append(outputTextUserRangesValueError)
       elif tempuserdata["resultToChat"] == False and tempuserdata["userpubchenn"] == False:
-         logger.info("User %s does not choice any method to receive the result", user_data['actualusername'])
+         logger.info("User %s does not choice any method to receive the result", user_data.get('actualusername', 'unknown'))
          outputTextList.append(replytext.UserReceiveResultError)
          chat_data.update({'state': 'advcreate'})
       else:
          if tempuserdata["userranges"] > generalcfg.userPageLimit:
-            logger.error("The INCORRECT userranges value of user %s is %d, Limit to %d", user_data['actualusername'], tempuserdata["userranges"], generalcfg.userPageLimit) 
+            logger.error("The INCORRECT userranges value of user %s is %d, Limit to %d", user_data.get('actualusername', 'unknown'), tempuserdata["userranges"], generalcfg.userPageLimit) 
             tempuserdata["userranges"] = generalcfg.userPageLimit
             outputTextRangeExcess = replytext.RangeExcess
             outputTextList.append(outputTextRangeExcess)
          if chat_data["fromedit"] == True:
-            logger.info("The correct usedata of user %s from advedit is %s.", user_data['actualusername'], str(tempuserdata))
+            logger.info("The correct usedata of user %s from advedit is %s.", user_data.get('actualusername', 'unknown'), str(tempuserdata))
             chat_data.update({'state': 'storeinfo'})
          else:        
-            logger.info("The correct usedata of user %s is %s.", user_data['actualusername'], str(tempuserdata))
+            logger.info("The correct usedata of user %s is %s.", user_data.get('actualusername', 'unknown'), str(tempuserdata))
             chat_data.update({"fromadvcreate": True, "fromedit": False, "fromguide": False, 'state': 'storeinfo'})
          user_data.update(tempuserdata)
          outputTextUserDataCheckComplete = replytext.UserDataCheckComplete
@@ -543,7 +543,7 @@ def advcreate(inputStr, user_data, chat_data, logger):
 
 def advedit(inputStr, user_data, chat_data, logger):
    outputTextList = []
-   tempuserdata = userdatastore.dataretrive(user_data['actualusername'])
+   tempuserdata = userdatastore.dataretrive(user_data.get('actualusername', 'unknown'))
    if tempuserdata.get(inputStr, 'None') == 'None':
       chat_data.update({'state': 'advedit'})
       outputTextErrorVirtualUserName = replytext.ErrorVirtualUserName
@@ -552,7 +552,7 @@ def advedit(inputStr, user_data, chat_data, logger):
       chat_data.update({"fromadvcreate": False, "fromedit": True, 
                         "fromguide": False, "oldvirusername": inputStr,
                         'state': 'advcreate'})
-      logger.info("User %s is going to edit %s", user_data['actualusername'], inputStr)
+      logger.info("User %s is going to edit %s", user_data.get('actualusername', 'unknown'), inputStr)
       tempuserdata = tempuserdata[inputStr]
       tempuserdata.update({"virtualusername": inputStr})
       del tempuserdata["actualusername"]
@@ -571,12 +571,12 @@ def advedit(inputStr, user_data, chat_data, logger):
 
 def delete(inputStr, user_data, chat_data, logger):
    outputTextList = []
-   logger.info("User %s has entered delete.", user_data['actualusername'])
+   logger.info("User %s has entered delete.", user_data.get('actualusername', 'unknown'))
    IOreportdict = userdatastore.datadelete(inputStr)
    if IOreportdict["hasdata"] == False:
       chat_data.update({'state': 'delete'})
       logger.error("User %s's virtual userdata %s not found.", 
-                   user_data['actualusername'], 
+                   user_data.get('actualusername', 'unknown'), 
                    inputStr
                   )
       outputTextVirUsernameNotFound = replytext.VirUsernameNotFound
@@ -584,7 +584,7 @@ def delete(inputStr, user_data, chat_data, logger):
    else:
       chat_data.update({'state': 'advance'})
       logger.info("User %s's virtual userdata %s has been deleted.", 
-                   user_data['actualusername'], 
+                   user_data.get('actualusername', 'unknown'), 
                    inputStr
                  )
       outputTextDeleteSuccess = replytext.DeleteSuccess.format(inputStr)
