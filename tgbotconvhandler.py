@@ -128,6 +128,13 @@ def verify(inputStr, user_data, chat_data, logger, context=None):
               'init': 'ssx_active',
               'timestamp': time.time()
           }
+          # ===================================================================
+          # SSX GHOST HUNT FIX - Explicitly set required keys for library lookups
+          # The Telegram library may access user_data['actualusername'] directly
+          # Setting these ensures the library never encounters a KeyError
+          # ===================================================================
+          user_data['actualusername'] = actusername
+          user_data['userkey'] = user_data.get('userkey', '')
           logger.info(f"[SSX VERIFY] Profile created for {actusername} (key={actusername}, chat_id={chat_id})")
       
       # PERSIST PROFILE TO DISK - Save user_data to userdata.json
