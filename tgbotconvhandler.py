@@ -556,6 +556,16 @@ def spiderfunction(logger, spiderDict=None, chat_id=None):
              tempChat_idList.append(generalcfg.pubChannelID)
           sendUserResultDict.update({sd: tempChat_idList})
        for sd in sendUserResultDict: 
+          # ===================================================================
+          # DISPATCHER SHIELDING (azuriteshift assist)
+          # Verify spiderDict[sd] is actually a dict before dispatch
+          # This makes the dispatcher "blind" to leftover strings/trash
+          # ===================================================================
+          if not isinstance(spiderDict.get(sd), dict):
+             logger.warning("Dispatcher skipping garbage entry '%s' at key '%s'", 
+                           str(spiderDict.get(sd)), str(sd))
+             continue
+          
           if sendUserResultDict[sd]:
              logger.info("Search user %s's information", str(sd))
              generator.Sleep.Havearest(sleep)
