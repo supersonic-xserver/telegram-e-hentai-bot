@@ -2,6 +2,7 @@
 import os
 import json
 import logging
+import time
 from ast import literal_eval
 from tgbotmodules import userdatastore
 from tgbotmodules import replytext
@@ -112,6 +113,34 @@ def verify(inputStr, user_data, chat_data, logger, context=None):
          logger.error("Userdata is corrupted, backuped and created new one at verify.")
       else:
          logger.info("Userdata checked at verify.")
+      # ===================================================================
+      # SSX PROFILE CREATION - Initialize user profile after verification
+      # Creates user profile entry in user_data for spiderDict sync
+      # Persists to disk immediately for Ghost Drive sync
+      # ===================================================================
+      actusername = user_data.get('actualusername')
+      chat_id = user_data.get('chat_id')
+      
+      if actusername and chat_id:
+          user_data[chat_id] = {
+              'actualusername': actusername,
+              'state': 'ssx_active',
+              'init': 'ssx_active',
+              'timestamp': time.time()
+          }
+          logger.info(f"[SSX VERIFY] Profile created for {actusername} (chat_id={chat_id})")
+      
+      # PERSIST PROFILE TO DISK - Save user_data to userdata.json
+      # This ensures Ghost Drive has the profile to sync
+      # Key by chat_id so spiderfunction can find it in getspiderinfo()
+      if chat_id and actusername:
+          try:
+              # datastore expects {key: userdata_dict}, use chat_id as key
+              userdatastore.datastore({chat_id: user_data[chat_id]})
+              logger.info(f"[SSX VERIFY] Profile persisted to disk for {actusername}")
+          except Exception as e:
+              logger.error(f"[SSX VERIFY] Failed to persist profile: {e}")
+      
       logger.info("Identity of %s verified", user_data['actualusername'])
       chat_data.update({"fromadvcreate": False, "fromedit": False, "fromguide": False})
       currentuserdata = userdatastore.dataretrive(actusername=user_data['actualusername'])
