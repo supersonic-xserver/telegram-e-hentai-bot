@@ -774,3 +774,42 @@ def get_ghost_drive_status() -> dict:
         pass
     
     return status
+
+
+# =======================================================================
+# MODERATION LOG - e621 Moderation Audit Trail
+# =======================================================================
+# Uses existing datastore() function which writes to userdata.json
+# Ghost Drive sync happens automatically - no instance storage needed
+# =======================================================================
+
+def append_mod_log(entry: dict) -> bool:
+    """
+    Append moderation action to log.
+    Uses existing datastore() which auto-syncs to Ghost Drive.
+    
+    Args:
+        entry: Dict with keys: timestamp, action, post_id, reasons, chat_id
+        
+    Returns:
+        True if saved, False otherwise
+    """
+    # Use existing datastore pattern - saves to userdata.json
+    # which gets synced to Ghost Drive automatically
+    result = datastore({"mod_logs": entry}, fromSpider=True)
+    return result.get('issaved', False)
+
+
+def get_mod_logs(limit: int = 100) -> list:
+    """
+    Get recent moderation logs from Ghost Drive synced userdata.
+    
+    Args:
+        limit: Number of recent entries (default: 100)
+        
+    Returns:
+        List of mod log entries
+    """
+    userdata = getspiderinfo()
+    logs = userdata.get('mod_logs', [])
+    return logs[-limit:] if len(logs) > limit else logs

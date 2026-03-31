@@ -61,11 +61,17 @@ from telegram.ext import (
     filters,
 )
 
+import re
+import asyncio
+
 from tgbotconvhandler import messageanalyze
 from tgbotconvhandler import spiderfunction
 from tgbotmodules import replytext
 from tgbotmodules.spidermodules import generalcfg
 from tgbotmodules import userdatastore
+from tgbotmodules.e621fetcher import fetcher_worker
+from tgbotmodules.e621evaluator import evaluator_worker
+from tgbotmodules.e621executor import executor_worker
 
 # =======================================================================
 # SSX LOGGING SETUP
@@ -174,6 +180,39 @@ STATE = range(1)
 # Track startup time for uptime display
 start_time = time.time()
 
+# =======================================================================
+# SSX DUNGEON MODERATION HANDLER - Uses existing safety_filter blocklist
+# =======================================================================
+# Blocks ALL content matching SSX blocklist - not just e621 links
+# Works for any blocked domain or content type in safety_filter
+# =======================================================================
+
+async def _handle_ssx_moderation(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Check all messages against existing SSX safety blocklist."""
+    if is_shutdown_requested():
+        return
+    
+    if not update.message or not update.message.text:
+        return
+    
+    # Use existing safety_filter - blocks all bad content
+    from tgbotmodules.safety_filter import is_safe
+    
+    # Check full message against blocklist (URLs, title, content)
+    safe, reason = is_safe(
+        tag_list=[],
+        title=update.message.text[:200],  # Check message as "title"
+        gallery_id=str(update.message.message_id),
+        url=update.message.text
+    )
+    
+    if not safe:
+        logger.info("[SSX MOD] Blocked message %s: %s", update.message.message_id, reason)
+        try:
+            await update.message.delete()
+            logger.info("[SSX MOD] Deleted blocked message")
+        except Exception as e:
+            logger.warning("[SSX MOD] Failed to delete message: %s", e)
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Start command handler - initiate conversation.
@@ -507,6 +546,16 @@ def main() -> None:
     
     # Add error handler
     application.add_error_handler(error)
+    
+    # Add SSX Dungeon moderation handler - uses existing pubChannelID (SSX NSFW chat)
+    if generalcfg.pubChannelID:
+        try:
+            ssx_channel = int(generalcfg.pubChannelID)
+            ssx_filter = filters.TEXT & filters.Chat(ssx_channel)
+            application.add_handler(MessageHandler(ssx_filter, _handle_ssx_moderation))
+            logger.info("[SSX MOD] Watching SSX NSFW chat %s for blocked content", ssx_channel)
+        except (ValueError, TypeError):
+            logger.warning("[SSX MOD] Invalid pubChannelID - handler not registered")
     
     # Create recurring search job
     application.job_queue.run_repeating(

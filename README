@@ -30,9 +30,23 @@ A Python Telegram bot tracking e-hentai/exhentai galleries and sending them to u
 **Environment Variables (SECURITY)**
 - `TG_TOKEN` - Telegram bot token
 - `TG_ADMIN_ID` - Admin user ID (int)
-- `TG_PUB_CHANNEL_ID` - Broadcast channel ID
+- `TG_PUB_CHANNEL_ID` - Broadcast channel ID (also used for SSX Dungeon moderation)
 - `TG_PASSCODE` - User verification passcode
 - `TG_PROXY` / `PROXY_URL` - SOCKS5/HTTP proxy support
+
+**SSX Dungeon Moderation (Auto-Delete Blocked Content)**
+The bot automatically monitors your `TG_PUB_CHANNEL_ID` (NSFW chat) and deletes messages containing:
+- Real-world porn sites (pornhub, xvideos, onlyfans, chaturbate, etc.)
+- Illegal/exploitative content (loli, shota, rape, incest, bestiality, etc.)
+- AI-generated content without human collaboration
+- Any content matching the existing SSX blocklist in safety_filter.py
+
+**Setup:**
+1. Set `TG_PUB_CHANNEL_ID` to your NSFW chat channel ID
+2. Add bot to the channel as admin
+3. Bot will automatically delete blocked content
+
+**No additional config needed** - uses the same blocklist as the E-Hentai gallery filter.
 
 **Stealth Mode (ENABLED BY DEFAULT)**
 - `ENABLE_STEALTH_MODE = True` - Rotating User-Agents + jitter delays
