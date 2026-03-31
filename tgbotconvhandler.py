@@ -122,21 +122,21 @@ def verify(inputStr, user_data, chat_data, logger, context=None):
       chat_id = user_data.get('chat_id')
       
       if actusername and chat_id:
-          user_data[chat_id] = {
+          user_data[actusername] = {
               'actualusername': actusername,
               'state': 'ssx_active',
               'init': 'ssx_active',
               'timestamp': time.time()
           }
-          logger.info(f"[SSX VERIFY] Profile created for {actusername} (chat_id={chat_id})")
+          logger.info(f"[SSX VERIFY] Profile created for {actusername} (key={actusername}, chat_id={chat_id})")
       
       # PERSIST PROFILE TO DISK - Save user_data to userdata.json
       # This ensures Ghost Drive has the profile to sync
       # Key by chat_id so spiderfunction can find it in getspiderinfo()
       if chat_id and actusername:
           try:
-              # datastore expects {key: userdata_dict}, use chat_id as key
-              userdatastore.datastore({chat_id: user_data[chat_id]})
+              # datastore merges with existing data using dict.update()
+              userdatastore.datastore(user_data)
               logger.info(f"[SSX VERIFY] Profile persisted to disk for {actusername}")
           except Exception as e:
               logger.error(f"[SSX VERIFY] Failed to persist profile: {e}")
