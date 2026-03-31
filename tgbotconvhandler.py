@@ -17,8 +17,26 @@ def verify(inputStr, user_data, chat_data, logger):
    stored_passcode = generalcfg.passcode
    user_input = inputStr.strip() if inputStr else ""
    
+   # ===================================================================
+   # TYPE SHIELD - CRITICAL SECURITY CHECK
+   # If user_data is NOT a dict (e.g., corrupted string), this prevents:
+   # - "string indices must be integers" errors
+   # - Authentication bypass via malformed data
+   # - Dispatcher crashes from garbage entries
+   # ===================================================================
+   if not isinstance(user_data, dict):
+      logger.warning(f"[SSX AUTH] user_data is corrupted (type={type(user_data).__name__}). "
+                     f"Resetting state to allow fresh login.")
+      user_data = {}
+      chat_data.update({'state': 'verify'})
+      outputTextList.append("Session reset. Please enter your password again.")
+      return {"outputTextList": outputTextList,
+              "outputChat_data": chat_data, 
+              "outputUser_data": user_data}
+   
+   # Now we can safely access user_data as a dict
    admin_id = os.environ.get("TG_ADMIN_ID", "").strip()
-   user_id = user_data.get('user_id', '') if isinstance(user_data, dict) else ''
+   user_id = user_data.get('user_id', '')
    is_admin = admin_id and str(user_id) == admin_id
    
    # ===================================================================
@@ -27,33 +45,24 @@ def verify(inputStr, user_data, chat_data, logger):
    # This fixes accounts stuck in string format from previous bugs
    # Reset any corrupted user profile to empty dict so user can log in fresh
    # ===================================================================
-   try:
-       # Try to get chat_id from user_data if available
-       chat_id = user_data.get('chat_id') if isinstance(user_data, dict) else None
-       if chat_id:
-           # Check the persistent userdata store
-           try:
-               persisted_userdata = userdatastore.dataretrive()
+   chat_id = user_data.get('chat_id')
+   if chat_id:
+       try:
+           # Get the raw persistent userdata (by reading file directly)
+           import json as _json
+           import os as _os
+           _data_dir = _os.path.join(_os.path.dirname(__file__), 'data')
+           _userdata_path = _os.path.join(_data_dir, 'userdata.json')
+           if _os.path.exists(_userdata_path):
+               with open(_userdata_path, 'r') as f:
+                   persisted_userdata = _json.load(f)
                if chat_id in persisted_userdata and not isinstance(persisted_userdata[chat_id], dict):
                    logger.warning(f"[SSX AUTH] Corrupted string data found for {chat_id}. Resetting to dict.")
-                   # Reset corrupted data to empty dict
                    persisted_userdata[chat_id] = {}
-                   # Save the corrected data back
-                   userdatastore.datastore(userdict=persisted_userdata)
-           except Exception as e:
-               logger.warning(f"[SSX AUTH] Could not check persistent userdata: {e}")
-   except Exception as e:
-       logger.warning(f"[SSX AUTH] Self-healing check failed: {e}")
-   
-   # ===================================================================
-   # SELF-HEALING AUTH GUARD (azuriteshift assist)
-   # Check if user_data is a raw string instead of a dict
-   # If corrupted (raw string from old bug), nuke it and rebuild
-   # ===================================================================
-   if not isinstance(user_data, dict):
-      logger.error("Self-healing: user_data is corrupted (type=%s), resetting to empty dict", 
-                   type(user_data).__name__)
-      user_data = {}
+                   with open(_userdata_path, 'w') as f:
+                       _json.dump(persisted_userdata, f)
+       except Exception as e:
+           logger.warning(f"[SSX AUTH] Could not check persistent userdata: {e}")
    
    if is_admin or user_input == stored_passcode:
       statusdict = userdatastore.userfiledetect()
