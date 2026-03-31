@@ -23,6 +23,16 @@ def verify(inputStr, user_data, chat_data, logger):
    user_id = user_data.get('user_id', '')
    is_admin = admin_id and str(user_id) == admin_id
    
+   # ===================================================================
+   # VERIFY INDEX FIX (azuriteshift assist)
+   # Ensure user_data is a dict before accessing string indices
+   # Handle malformed/corrupted userdata gracefully
+   # ===================================================================
+   if not isinstance(user_data, dict):
+      logger.error("Malformed user_data detected in verify: type=%s, value=%s", 
+                   type(user_data).__name__, str(user_data)[:200])
+      user_data = {}  # Reset to empty dict to prevent AttributeError/TypeError
+   
    if is_admin or user_input == stored_passcode:
       statusdict = userdatastore.userfiledetect()
       if statusdict['isfile'] == False:
@@ -561,7 +571,7 @@ def spiderfunction(logger, spiderDict=None, chat_id=None):
           # Verify spiderDict[sd] is actually a dict before dispatch
           # This makes the dispatcher "blind" to leftover strings/trash
           # ===================================================================
-          if not isinstance(spiderDict.get(sd), dict):
+          if not isinstance(spiderDict[sd], dict):
              logger.warning("Dispatcher skipping garbage entry '%s' at key '%s'", 
                            str(spiderDict.get(sd)), str(sd))
              continue
