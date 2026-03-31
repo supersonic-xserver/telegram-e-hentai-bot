@@ -59,6 +59,7 @@ from telegram.ext import (
     ConversationHandler,
     ContextTypes,
     filters,
+    Defaults,
 )
 
 import re
@@ -674,12 +675,9 @@ def main() -> None:
         builder.http_version("1.1")
         builder.get_updates_proxy_url(generalcfg.proxy[0])
     
-    # Configure job scheduler to be resilient to background errors
-    builder.job_defaults(
-        misfire_grace_time=15,  # Allow 15s grace for missed jobs
-        coalesce=True,           # Combine multiple pending executions into one
-        max_instances=1          # Only one instance of each job at a time
-    )
+    # NOTE: Job queue settings (misfire_grace_time, coalesce, max_instances) are 
+    # configured per-job in run_repeating() calls, not via ApplicationBuilder.
+    # The builder.defaults() method is for Defaults object (parse_mode, etc).
     
     application = builder.build()
     
