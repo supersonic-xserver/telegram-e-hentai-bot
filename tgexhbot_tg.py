@@ -319,7 +319,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     context.chat_data.clear()
     context.user_data.update({
         "actualusername": str(update.message.from_user.username),
-        "chat_id": update.message.chat_id
+        "chat_id": update.message.chat_id,
+        "user_id": update.effective_user.id  # For admin bypass verification
     })
     logger.info("Actual username is %s.", str(update.message.from_user.username))
     await update.message.reply_text(text=replytext.startMessage)
