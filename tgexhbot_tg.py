@@ -759,6 +759,16 @@ def main() -> None:
     
     logger.info("Bot initiating...")
     
+    # ===================================================================
+    # CONFLICT DAMPENING
+    # Add delay before polling to let Koyeb kill the previous instance's connection
+    # This prevents "Conflict" loop from killing the new instance before it starts
+    # ===================================================================
+    logger.info("[SSX BOOT] Waiting 5s for Koyeb to terminate old instance connections...")
+    import time
+    time.sleep(5)
+    logger.info("[SSX BOOT] Proceeding with polling...")
+    
     # Graceful Exit - wrap polling in try/finally
     # This ensures application.shutdown() is called before loop destruction
     try:
