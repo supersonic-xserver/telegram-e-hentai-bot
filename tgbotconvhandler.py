@@ -26,7 +26,7 @@ def verify(inputStr, user_data, chat_data, logger):
    if is_admin or user_input == stored_passcode:
       statusdict = userdatastore.userfiledetect()
       if statusdict['isfile'] == False:
-         logger.error("Missied userdata, created new one at verify.")
+         logger.error("Missed userdata, created new one at verify.")
       elif statusdict['iscorrect'] == False:
          logger.error("Userdata is corrupted, backuped and created new one at verify.")
       else:
@@ -514,16 +514,16 @@ def spiderfunction(logger, spiderDict=None, chat_id=None):
           # print (spiderDict)
           for sD in spiderDict:
              # ===================================================================
-             # DICTIONARY TYPE-GUARD
-             # Fix AttributeError: spiderDict[sD] may be a string (keyword) 
-             # instead of a user settings dictionary when userdata is fresh/empty.
-             # Convert orphaned strings to proper settings dicts.
+             # COMPREHENSIVE TYPE-GUARD
+             # Fix AttributeError: spiderDict[sD] may be any non-dict type 
+             # (string, float, etc.) from fresh/empty or corrupted userdata.
+             # Convert any non-dict to a safe settings dict with keywords list.
              # ===================================================================
-             if isinstance(spiderDict[sD], str):
-                # Convert the orphaned string/keyword into a proper settings dict
-                keyword = spiderDict[sD]
-                spiderDict[sD] = {'keywords': [keyword]}
-                logger.info("Converted orphan keyword '%s' to settings dict", keyword)
+             if not isinstance(spiderDict[sD], dict):
+                # Log it for transparency, then convert to a safe dict structure
+                keyword_fallback = str(spiderDict[sD])
+                spiderDict[sD] = {'keywords': [keyword_fallback]}
+                logger.info("Converted orphan value '%s' to settings dict", keyword_fallback)
              
              # Now spiderDict[sD] is guaranteed to be a dictionary
              spiderDict[sD].update({'userpubchenn': False, 'resultToChat': True})
