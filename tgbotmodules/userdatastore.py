@@ -877,7 +877,8 @@ def sync_to_ghost_drive(bot: Any) -> Tuple[bool, str]:
     """
     Sync current user data to the Ghost Drive (Telegram Channel backup).
     
-    Added empty file safeguard to prevent uploading 0-byte files.
+    Added Ghost Sync Shield - catches all exceptions
+    to prevent re-raising and poisoning the main loop.
     
     Args:
         bot: The Telegram bot instance for API calls.
@@ -894,10 +895,22 @@ def sync_to_ghost_drive(bot: Any) -> Tuple[bool, str]:
     
     global _last_ghost_sync_time
     
-    if not _validate_channel_id(DATABASE_CHANNEL_ID):
-        return (False, "Ghost Drive not configured or invalid channel ID")
-    
+    # Ghost Sync Shield - wrap entire function in try/except
+    # This prevents ANY exception from propagating back to the scheduler
     try:
+        if not _validate_channel_id(DATABASE_CHANNEL_ID):
+            return (False, "Ghost Drive not configured or invalid channel ID")
+        
+        # Check for empty file BEFORE reading
+        userdata_path = './userdata/userdata'
+        try:
+            if os.path.exists(userdata_path) and os.path.getsize(userdata_path) == 0:
+                logger.warning("[SSX GHOST] Local file is 0 bytes, cannot sync")
+                return (False, "Local file empty - cannot sync")
+        except OSError as e:
+            logger.warning(f"[SSX GHOST] Cannot check file size: {e}")
+            return (False, "Cannot access local file")
+        
         chat_id = int(DATABASE_CHANNEL_ID)
         
         # Generate timestamp for this backup

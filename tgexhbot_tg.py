@@ -725,14 +725,42 @@ def main() -> None:
     
     logger.info("Bot initiating...")
     
-    # Run with polling - drop_pending_updates clears conflicts with old instances
-    # close_loop=False prevents "event loop closed" errors from killing the main loop
-    application.run_polling(
-        allowed_updates=Update.ALL_TYPES,
-        drop_pending_updates=True,  # Clear conflicts with old instances
-        close_loop=False,           # Keep loop alive even if background tasks have issues
-        timeout=10                  # Shorter timeout for faster redeploy
-    )
+    # Graceful Exit - wrap polling in try/finally
+    # This ensures application.shutdown() is called before loop destruction
+    try:
+        # Run with polling - drop_pending_updates clears conflicts with old instances
+        # close_loop=False prevents "event loop closed" errors from killing the main loop
+        application.run_polling(
+            allowed_updates=Update.ALL_TYPES,
+            drop_pending_updates=True,  # Clear conflicts with old instances
+            close_loop=False,           # Keep loop alive even if background tasks have issues
+            timeout=10                  # Shorter timeout for faster redeploy
+        )
+    finally:
+        # Explicit graceful shutdown while loop is still valid
+        logger.info("[SSX SHUTDOWN] Polling ended, initiating graceful shutdown...")
+        try:
+            # Get the event loop if it exists
+            loop = None
+            try:
+                loop = asyncio.get_event_loop()
+                if loop.is_running():
+                    # Create a new loop for shutdown if current is busy
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+            except RuntimeError:
+                # No loop exists, create one
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+            
+            # Run shutdown in the loop
+            if loop and not loop.is_running():
+                loop.run_until_complete(application.shutdown())
+                logger.info("[SSX SHUTDOWN] Application shutdown complete")
+        except Exception as e:
+            logger.warning(f"[SSX SHUTDOWN] Graceful shutdown warning: {e}")
+        finally:
+            logger.info("[SSX SHUTDOWN] Exit complete")
 
 
 if __name__ == '__main__':
