@@ -22,6 +22,30 @@ def verify(inputStr, user_data, chat_data, logger):
    is_admin = admin_id and str(user_id) == admin_id
    
    # ===================================================================
+   # DATABASE SURGERY - SELF-HEALING GUARD
+   # Check if chat_id data in persistent userdata is corrupted (string instead of dict)
+   # This fixes accounts stuck in string format from previous bugs
+   # Reset any corrupted user profile to empty dict so user can log in fresh
+   # ===================================================================
+   try:
+       # Try to get chat_id from user_data if available
+       chat_id = user_data.get('chat_id') if isinstance(user_data, dict) else None
+       if chat_id:
+           # Check the persistent userdata store
+           try:
+               persisted_userdata = userdatastore.dataretrive()
+               if chat_id in persisted_userdata and not isinstance(persisted_userdata[chat_id], dict):
+                   logger.warning(f"[SSX AUTH] Corrupted string data found for {chat_id}. Resetting to dict.")
+                   # Reset corrupted data to empty dict
+                   persisted_userdata[chat_id] = {}
+                   # Save the corrected data back
+                   userdatastore.datastore(userdict=persisted_userdata)
+           except Exception as e:
+               logger.warning(f"[SSX AUTH] Could not check persistent userdata: {e}")
+   except Exception as e:
+       logger.warning(f"[SSX AUTH] Self-healing check failed: {e}")
+   
+   # ===================================================================
    # SELF-HEALING AUTH GUARD (azuriteshift assist)
    # Check if user_data is a raw string instead of a dict
    # If corrupted (raw string from old bug), nuke it and rebuild
