@@ -389,7 +389,7 @@ async def searchIntervalCTL(context: ContextTypes.DEFAULT_TYPE) -> None:
     )
 
 
-async def searcheh(bot, user_data, threadName: str = None) -> None:
+async def searcheh(bot, user_data, threadName: str = None, chat_id: int = None) -> None:
     """
     Main search function - controls the spider and result delivery.
     
@@ -397,12 +397,15 @@ async def searcheh(bot, user_data, threadName: str = None) -> None:
         bot: Bot instance for sending messages
         user_data: Optional user data dict (None for all users)
         threadName: Name for the search thread
+        chat_id: Optional chat ID for direct command triggering
     """
     # SSX SHUTDOWN CHECK: Don't start new searches if shutting down
     if is_shutdown_requested():
         logger.warning("Shutdown requested, skipping search operation.")
         return
     
+    # [SSX DEBUG] Confirm search triggers
+    logger.info(f"[SSX DEBUG] searcheh triggered! user_data={bool(user_data)}, threadName={threadName}, chat_id={chat_id}")
     logger.info("Search is beginning")
     
     if user_data:
@@ -568,6 +571,36 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     return ConversationHandler.END
 
 
+async def search(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """
+    SSX Search Command - Manually trigger a search for all users.
+    
+    This command bypasses the ConversationHandler to directly trigger
+    the search function. Useful after redeploys when ConversationHandler
+    state might be stale.
+    """
+    logger.info(f"[SSX DEBUG] Received /search from {update.effective_user.id}")
+    
+    # Clear any stale conversation state
+    context.user_data.clear()
+    context.chat_data.clear()
+    
+    await update.message.reply_text("🔍 SSX Search initiated...")
+    
+    # Trigger search in background
+    context.application.create_task(
+        searcheh(
+            context.bot,
+            None,  # None = search all users
+            threadName=f"manual_{time.time()}"
+        )
+    )
+    
+    await update.message.reply_text("✅ Search running in background. Results will be sent when complete.")
+    
+    return ConversationHandler.END
+
+
 # =======================================================================
 # MAIN ENTRY POINT
 # =======================================================================
@@ -700,6 +733,9 @@ def main() -> None:
     
     # Add /status command handler
     application.add_handler(CommandHandler('status', status))
+    
+    # Add /search command handler - manual search trigger bypassing ConversationHandler
+    application.add_handler(CommandHandler('search', search))
     
     # Add error handler
     application.add_error_handler(error)
