@@ -44,8 +44,8 @@ def searchgenerate(generateDict):
       to the spider.'''
    searchopt = searchparser()
 #    print (generateDict)
-   if generateDict['userkey']:
-      searchopt.keyword = generateDict['userkey']
+   if generateDict.get('userkey'):
+      searchopt.keyword = generateDict.get('userkey', '')
    # if 'non-h' in generateDict['usercate']:
    #    generateDict['usercate'].remove('non-h')
    #    generateDict['usercate'].append('non_h')
