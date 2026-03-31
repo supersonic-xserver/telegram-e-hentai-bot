@@ -47,15 +47,17 @@ def verify(inputStr, user_data, chat_data, logger, context=None):
       }
    
    # ===================================================================
-   # SSX LIBRARY HANDSHAKE - Set actualusername at very beginning
-   # Satisfy Telegram library requirements before any other logic
-   # This prevents KeyError warnings during handoff
+   # SSX LIBRARY HANDSHAKE - Set actualusername at the root level
+   # This satisfies the Telegram library's requirement for the key
+   # to exist in user_data during the verify process.
+   # The Spider will blacklist this key to prevent crawling.
    # ===================================================================
-   if 'actualusername' not in user_data:
-       # Try to get from user_id lookup or use chat_id as fallback
-       _temp_username = user_data.get('actualusername') or str(user_data.get('chat_id', ''))
-       if _temp_username:
-           user_data['actualusername'] = _temp_username
+   # Immediate assignment to satisfy the library bouncer
+   _temp_un = user_data.get('actualusername')
+   if not _temp_un:
+       _temp_un = str(user_data.get('chat_id', ''))
+   if _temp_un:
+       user_data['actualusername'] = _temp_un
    
    # Now we can safely access user_data as a dict
    admin_id = os.environ.get("TG_ADMIN_ID", "").strip()
