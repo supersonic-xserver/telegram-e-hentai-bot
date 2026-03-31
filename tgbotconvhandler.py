@@ -514,16 +514,28 @@ def spiderfunction(logger, spiderDict=None, chat_id=None):
           # print (spiderDict)
           for sD in spiderDict:
              # ===================================================================
-             # COMPREHENSIVE TYPE-GUARD
-             # Fix AttributeError: spiderDict[sD] may be any non-dict type 
-             # (string, float, etc.) from fresh/empty or corrupted userdata.
-             # Convert any non-dict to a safe settings dict with keywords list.
+             # COMPREHENSIVE TYPE-GUARD WITH ORPHAN FILTERING
+             # Fix AttributeError and KeyError: spiderDict[sD] may be any non-dict 
+             # type (string, float, boolean) from fresh/empty or corrupted userdata.
+             # Convert any non-dict to a safe settings dict with chat_id mapping.
+             # Filter out garbage orphan values to save API calls.
              # ===================================================================
              if not isinstance(spiderDict[sD], dict):
-                # Log it for transparency, then convert to a safe dict structure
-                keyword_fallback = str(spiderDict[sD])
-                spiderDict[sD] = {'keywords': [keyword_fallback]}
-                logger.info("Converted orphan value '%s' to settings dict", keyword_fallback)
+                val_str = str(spiderDict[sD])
+                
+                # Filter out obvious non-keyword orphans to save API calls
+                # Skip boolean strings, init markers, and numeric values (timestamps)
+                if val_str in ['True', 'False', 'ssx_active'] or val_str.replace('.','',1).replace('-','',1).isdigit():
+                    logger.info("Skipping garbage orphan value '%s'", val_str)
+                    continue
+                
+                # Map the loop key (sd) back to chat_id for result delivery
+                spiderDict[sD] = {
+                    'keywords': [val_str],
+                    'chat_id': sD,  # Map loop key to chat_id for result delivery
+                    'resultToChat': True
+                }
+                logger.info("Converted orphan value '%s' to settings dict with chat_id", val_str)
              
              # Now spiderDict[sD] is guaranteed to be a dictionary
              spiderDict[sD].update({'userpubchenn': False, 'resultToChat': True})
@@ -536,10 +548,11 @@ def spiderfunction(logger, spiderDict=None, chat_id=None):
 
        for sd in spiderDict:
           tempChat_idList = []
-          # print (spiderDict[sd]['resultToChat'])
-          if spiderDict[sd]['resultToChat'] == True and spiderDict[sd]['chat_id']:
+          # Use .get() for safety to prevent KeyError if dict is malformed
+          if spiderDict[sd].get('resultToChat') == True and spiderDict[sd].get('chat_id'):
              tempChat_idList.append(spiderDict[sd]['chat_id'])
-          if spiderDict[sd]["userpubchenn"] == True and generalcfg.pubChannelID:
+          # Use .get() for safety - prevent KeyError if dict is malformed
+          if spiderDict[sd].get("userpubchenn") == True and generalcfg.pubChannelID:
              tempChat_idList.append(generalcfg.pubChannelID)
           sendUserResultDict.update({sd: tempChat_idList})
        for sd in sendUserResultDict: 
