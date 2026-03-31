@@ -567,31 +567,11 @@ def load_from_ghost_drive(bot: Any) -> Tuple[bool, str]:
             backup_source = {"document": document, "caption": f"Pinned backup (msg {msg_id})"}
             logger.info(f"[SSX GHOST DRIVE] Found pinned backup (msg {msg_id})")
         else:
-            # FALLBACK: Search chat history for backup
-            logger.info("[SSX GHOST DRIVE] No pinned backup, searching chat history...")
-            
-            messages_data = _get_chat_history_via_api(bot_token, chat_id, limit=100)
-            
-            # Find the latest backup document
-            latest_backup = None
-            latest_date = None
-            
-            for msg in messages_data:
-                if msg.get("document"):
-                    caption = msg.get("caption", "")
-                    if GHOST_DRIVE_BACKUP_PREFIX in caption:
-                        msg_date = msg.get("date", 0)
-                        if latest_date is None or msg_date > latest_date:
-                            latest_backup = msg
-                            latest_date = msg_date
-            
-            if not latest_backup:
-                # NO BACKUP FOUND: Return immediately to trigger local file load
-                # No infinite loops - this is the safe exit point
-                logger.info("[SSX GHOST DRIVE] No backup found in channel - using local file")
-                return (False, "No Ghost Drive backup found in channel - first-time setup")
-            
-            backup_source = latest_backup
+            logger.info(
+                "[SSX GHOST DRIVE] No pinned backup found. "
+                "Next sync will create and pin a new backup. Using local file."
+            )
+            return (False, "No Ghost Drive backup found - will create new backup on next sync")
         
         # =================================================================
         # DOWNLOAD AND VALIDATE THE BACKUP
@@ -668,6 +648,83 @@ def load_from_ghost_drive(bot: Any) -> Tuple[bool, str]:
         return (False, f"Ghost Drive load error: invalid JSON")
 
 
+async def _upload_with_backoff_async(
+    bot: Any,
+    chat_id: int,
+    data: dict,
+    caption: str,
+    max_retries: int = 5
+) -> Tuple[bool, str, int, int]:
+    """
+    ASYNC VERSION: Upload compressed data to Telegram with exponential backoff.
+    
+    Uses asyncio.sleep for proper async delay handling.
+    
+    Args:
+        bot: The async Telegram bot instance (PTB v20+).
+        chat_id: The channel chat ID.
+        data: The dictionary data to upload (will be compressed).
+        caption: The message caption.
+        max_retries: Maximum retry attempts (default: 5).
+        
+    Returns:
+        Tuple of (success, message, compressed_file_size, message_id).
+        message_id is 0 if upload failed.
+    """
+    import asyncio
+    
+    compressed_data, original_size = _compress_json_data(data)
+    
+    fd, temp_path = tempfile.mkstemp(suffix='.json.gz', prefix='.ghost_backup_')
+    os.close(fd)
+    
+    try:
+        with open(temp_path, 'rb') as f:
+            file_content = f.read()
+        
+        for attempt in range(max_retries):
+            try:
+                # PTB v20+ bot methods are async - must await them
+                msg = await bot.send_document(
+                    chat_id=chat_id,
+                    document=file_content,
+                    filename='user_data.json.gz',
+                    caption=caption
+                )
+                
+                # Extract message_id from the returned Message object
+                message_id = msg.message_id if msg else 0
+                
+                logger.info(
+                    f"[SSX GHOST DRIVE] Upload successful: {caption} "
+                    f"(compressed: {len(compressed_data)}/{original_size} bytes, msg_id: {message_id})"
+                )
+                return (True, caption, len(compressed_data), message_id)
+                
+            except Exception as e:
+                error_str = str(e).lower()
+                
+                # Check for rate limit (429)
+                if '429' in error_str or 'too many requests' in error_str:
+                    # Exponential backoff: 2, 4, 8, 16, 32 seconds
+                    wait_time = min(2 ** (attempt + 1), 60)
+                    logger.warning(
+                        f"[SSX GHOST DRIVE] Rate limited, waiting {wait_time}s "
+                        f"(attempt {attempt + 1}/{max_retries})"
+                    )
+                    await asyncio.sleep(wait_time)
+                    continue
+                
+                # Non-retryable error - re-raise
+                raise
+        
+        return (False, "Max retries exceeded due to rate limiting", len(compressed_data), 0)
+        
+    finally:
+        if os.path.exists(temp_path):
+            os.unlink(temp_path)
+
+
 def _upload_with_backoff(
     bot: Any,
     chat_id: int,
@@ -676,10 +733,10 @@ def _upload_with_backoff(
     max_retries: int = 5
 ) -> Tuple[bool, str, int, int]:
     """
-    Upload compressed data to Telegram with exponential backoff on rate limits.
+    SYNC WRAPPER: Upload compressed data to Telegram.
     
-    Uses asyncio.Lock to prevent race conditions when multiple sync
-    operations are triggered simultaneously.
+    This is a sync wrapper that runs the async version using asyncio.run().
+    Use _upload_with_backoff_async() for proper async contexts.
     
     Args:
         bot: The Telegram bot instance.
@@ -691,6 +748,53 @@ def _upload_with_backoff(
     Returns:
         Tuple of (success, message, compressed_file_size, message_id).
         message_id is 0 if upload failed.
+    """
+    import asyncio
+    
+    try:
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            # If already in async context, we need to schedule it
+            # This shouldn't happen in sync wrapper, but handle it anyway
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor() as executor:
+                future = executor.submit(
+                    _upload_with_backoff_sync_impl,
+                    bot, chat_id, data, caption, max_retries
+                )
+                return future.result()
+        else:
+            return loop.run_until_complete(
+                _upload_with_backoff_async(bot, chat_id, data, caption, max_retries)
+            )
+    except RuntimeError:
+        # No event loop, create one
+        return asyncio.run(
+            _upload_with_backoff_async(bot, chat_id, data, caption, max_retries)
+        )
+
+
+def _upload_with_backoff_sync_impl(
+    bot: Any,
+    chat_id: int,
+    data: dict,
+    caption: str,
+    max_retries: int
+) -> Tuple[bool, str, int, int]:
+    """
+    SYNC IMPLEMENTATION: Upload compressed data to Telegram without async.
+    
+    For use when asyncio.run() isn't available or we need sync execution.
+    
+    Args:
+        bot: The Telegram bot instance.
+        chat_id: The channel chat ID.
+        data: The dictionary data to upload (will be compressed).
+        caption: The message caption.
+        max_retries: Maximum retry attempts.
+        
+    Returns:
+        Tuple of (success, message, compressed_file_size, message_id).
     """
     import time
     
@@ -713,7 +817,12 @@ def _upload_with_backoff(
                         caption=caption
                     )
                 
-                # Extract message_id from the returned Message object
+                # Extract message_id - handle both coroutine and Message object
+                if asyncio.iscoroutine(msg):
+                    # This shouldn't happen in sync context, but just in case
+                    logger.warning("[SSX GHOST DRIVE] Got coroutine in sync context - awaiting")
+                    msg = asyncio.run(msg)
+                
                 message_id = msg.message_id if msg else 0
                 
                 logger.info(
@@ -725,9 +834,7 @@ def _upload_with_backoff(
             except Exception as e:
                 error_str = str(e).lower()
                 
-                # Check for rate limit (429)
                 if '429' in error_str or 'too many requests' in error_str:
-                    # Exponential backoff: 2, 4, 8, 16, 32 seconds
                     wait_time = min(2 ** (attempt + 1), 60)
                     logger.warning(
                         f"[SSX GHOST DRIVE] Rate limited, waiting {wait_time}s "
@@ -736,7 +843,6 @@ def _upload_with_backoff(
                     time.sleep(wait_time)
                     continue
                 
-                # Non-retryable error
                 raise
         
         return (False, "Max retries exceeded due to rate limiting", len(compressed_data), 0)

@@ -80,6 +80,88 @@ logger = logging.getLogger(__name__)
 
 
 # =======================================================================
+# SUBAGENT 9.2: KOYEB HEALTH CHECK SERVER
+# =======================================================================
+# Koyeb sends TCP health checks to port 8000. This thread responds to them
+# so the bot appears "alive" to Koyeb's load balancer even during searches.
+# =======================================================================
+import threading
+import socket
+
+_health_server_running = False
+
+
+def _run_health_check_server(port: int = 8000) -> None:
+    """
+    Run a minimal HTTP server on the specified port to respond to Koyeb health checks.
+    
+    This runs in a separate thread so it doesn't block the main bot operations.
+    
+    Args:
+        port: Port to listen on (default: 8000 for Koyeb)
+    """
+    global _health_server_running
+    
+    server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    
+    try:
+        server_socket.bind(('0.0.0.0', port))
+        server_socket.listen(1)
+        server_socket.settimeout(1.0)  # Check periodically for shutdown flag
+        
+        logger.info(f"[SSX HEALTH] Health check server listening on port {port}")
+        _health_server_running = True
+        
+        while _health_server_running:
+            try:
+                client_socket, addr = server_socket.accept()
+                # Respond with minimal HTTP 200 OK
+                http_response = b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nContent-Type: text/plain\r\nConnection: close\r\n\r\nOK"
+                client_socket.sendall(http_response)
+                client_socket.close()
+            except socket.timeout:
+                continue
+            except Exception as e:
+                logger.warning(f"[SSX HEALTH] Socket error: {e}")
+                continue
+                
+    except OSError as e:
+        logger.warning(f"[SSX HEALTH] Could not bind to port {port}: {e}")
+    finally:
+        server_socket.close()
+        _health_server_running = False
+        logger.info("[SSX HEALTH] Health check server stopped")
+
+
+def start_health_check_server(port: int = 8000) -> threading.Thread:
+    """
+    Start the health check server in a background thread.
+    
+    Args:
+        port: Port to listen on (default: 8000)
+        
+    Returns:
+        The background thread running the health check server
+    """
+    health_thread = threading.Thread(
+        target=_run_health_check_server,
+        args=(port,),
+        name="SSX-HealthCheck",
+        daemon=True  # Don't block shutdown
+    )
+    health_thread.start()
+    logger.info(f"[SSX HEALTH] Health check server started on port {port}")
+    return health_thread
+
+
+def stop_health_check_server() -> None:
+    """Stop the health check server."""
+    global _health_server_running
+    _health_server_running = False
+
+
+# =======================================================================
 # SSX LOG INJECTION FIX - Safe Log Helper
 # =======================================================================
 def _safe_log(value: str) -> str:
@@ -516,6 +598,12 @@ async def _ghost_sync_job(context: ContextTypes.DEFAULT_TYPE) -> None:
 
 def main() -> None:
     """Main entry point for the bot."""
+    # ===================================================================
+    # SUBAGENT 9.2: START KOYEB HEALTH CHECK SERVER
+    # Must start BEFORE polling to respond to load balancer probes
+    # ===================================================================
+    health_thread = start_health_check_server(port=8000)
+    
     # SSX ZERO-BUG: Register signal handlers for graceful shutdown
     _register_signal_handlers()
     
