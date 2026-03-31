@@ -547,8 +547,18 @@ async def error(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     NUCLEAR STATE CLEAR on "string indices" errors
     When "string indices must be integers" error is caught, force full state reset
     to prevent corrupted state from affecting subsequent operations.
+    
+    [SSX BOUNCER BRIBE] Ensure actualusername exists in context.user_data
+    The Telegram library may access this key during internal cleanup/error handling.
     """
     global _loop_healthy
+    
+    # [SSX BOUNCER BRIBE] Set actualusername immediately in context.user_data
+    # This satisfies the Telegram library's internal access during error handling
+    if hasattr(update, 'effective_user') and update.effective_user:
+        _error_username = update.effective_user.username or str(update.effective_user.id)
+        if _error_username:
+            context.user_data['actualusername'] = _error_username
     
     error_msg = str(context.error) if context.error else "Unknown error"
     
