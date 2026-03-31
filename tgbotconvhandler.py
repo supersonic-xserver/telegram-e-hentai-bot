@@ -140,6 +140,13 @@ def verify(inputStr, user_data, chat_data, logger, context=None):
           user_data[actusername]['init'] = 'ssx_active'
           user_data[actusername]['timestamp'] = time.time()
           
+          # ===================================================================
+          # SSX LIBRARY HANDSHAKE - Satisfy Telegram library requirements
+          # Keep actualusername at root level for library lookups
+          # The Spider will blacklist this key to prevent crawling
+          # ===================================================================
+          user_data['actualusername'] = actusername
+          
           logger.info(f"[SSX VERIFY] Profile created for {actusername} (key={actusername}, chat_id={chat_id})")
       
       # PERSIST PROFILE TO DISK - Save user_data to userdata.json
@@ -651,6 +658,19 @@ def spiderfunction(logger, spiderDict=None, chat_id=None):
        if '_metadata' in spiderDict:
            logger.info("[SSX METADATA ISOLATION] Filtering out _metadata from spiderDict")
            del spiderDict['_metadata']
+       
+       # =======================================================================
+       # SSX SYSTEM KEY BLACKLIST - Skip Telegram library handshaking keys
+       # These keys exist at root level to satisfy the Telegram library requirements
+       # but should NOT be crawled by the Spider (they are "dead ends")
+       # =======================================================================
+       _system_blacklist = {'actualusername', 'userkey', 'chat_id', 'user_id', 'state'}
+       _blacklist_removed = False
+       for key in list(spiderDict.keys()):
+           if key in _system_blacklist:
+               logger.info(f"[SSX BLACKLIST] Skipping system key (library handshake): {key}")
+               del spiderDict[key]
+               _blacklist_removed = True
        
        # LEGACY GARBAGE FILTER: Remove any legacy top-level garbage keys
        # These may exist from older backups before metadata isolation was implemented
