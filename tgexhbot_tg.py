@@ -589,10 +589,14 @@ if __name__ == '__main__':
     )
     logging.getLogger('requests').setLevel(logging.CRITICAL)
     
-    # Suppress PTB's httpx client from logging full URLs (contains bot token)
-    # Fixes CodeQL: py/clear-text-logging-sensitive-data
+    # ===================================================================
+    # SUBAGENT 3: TOKEN MASKING & LOG SANITIZATION
+    # Suppress PTB's httpx/httpcore/telegram.utils.request from logging
+    # full URLs (contains bot token) - Fixes CodeQL alerts
+    # ===================================================================
     logging.getLogger("httpx").setLevel(logging.WARNING)
     logging.getLogger("httpcore").setLevel(logging.WARNING)
+    logging.getLogger("telegram.utils.request").setLevel(logging.WARNING)
     logging.getLogger("telegram.ext.Application").setLevel(logging.WARNING)
     
     main()

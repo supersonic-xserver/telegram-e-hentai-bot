@@ -387,8 +387,8 @@ def _decompress_json_data(compressed_data: bytes) -> Optional[dict]:
     try:
         decompressed = gzip.decompress(compressed_data)
         return json.loads(decompressed.decode('utf-8'))
-    except Exception as e:
-        logger.error(f"[SSX GHOST DRIVE] Decompression failed: {_safe_error_message(e)}")
+    except (gzip.BadGzipFile, json.JSONDecodeError, UnicodeDecodeError) as e:
+        logger.error(f"[SSX GHOST DRIVE] Decompression/parse failed: {_safe_error_message(e)}")
         return None
 
 
@@ -432,23 +432,25 @@ def _get_chat_history_via_api(bot_token: str, chat_id: int, limit: int = 100) ->
             if data.get("ok"):
                 return data.get("result", [])
         logger.warning(f"[SSX GHOST DRIVE] getChatHistory API error: {resp.text[:200]}")
-    except Exception as e:
+    except _requests.RequestException as e:
         logger.warning(f"[SSX GHOST DRIVE] getChatHistory request failed: {e}")
     return []
 
 
-def _get_pinned_message_document(bot_token: str, chat_id: int) -> Optional[dict]:
+def _get_pinned_message_document(bot_token: str, chat_id: int) -> Optional[Tuple[str, dict]]:
     """
-    Get document from pinned message if available.
+    Get document file_id from pinned message if available.
     
-    This allows the backup to be pinned and retrieved via pinned_message.
+    Uses the getChat API to directly retrieve the pinned message document.
+    This is the "Pinned Reference" strategy - the backup is always pinned
+    and retrieved directly rather than searching chat history.
     
     Args:
         bot_token: The Telegram bot token.
         chat_id: The channel chat ID.
         
     Returns:
-        Document dict or None if not found.
+        Tuple of (message_id str, document dict) or None if not pinned/found.
     """
     import requests as _requests
     
@@ -464,24 +466,64 @@ def _get_pinned_message_document(bot_token: str, chat_id: int) -> Optional[dict]
             if data.get("ok"):
                 pinned = data.get("result", {}).get("pinned_message")
                 if pinned and pinned.get("document"):
-                    return pinned["document"]
-    except Exception as e:
+                    msg_id = str(pinned.get("message_id", ""))
+                    return (msg_id, pinned["document"])
+    except _requests.RequestException as e:
         logger.warning(f"[SSX GHOST DRIVE] getChat request failed: {e}")
     return None
+
+
+def _pin_backup_message(bot: Any, chat_id: int, message_id: int) -> bool:
+    """
+    Pin a backup message in the Ghost Drive channel.
+    
+    After uploading a new backup, this pins it as the reference point.
+    This is the "Pinned Reference" write strategy.
+    
+    Safety: Wrapped in try/except so that if the bot lacks "pin" permissions,
+    the backup still exists in history (even if auto-load fails).
+    
+    Args:
+        bot: The Telegram bot instance.
+        chat_id: The channel chat ID.
+        message_id: The message ID to pin.
+        
+    Returns:
+        True if pinned successfully, False otherwise.
+    """
+    try:
+        bot.pin_chat_message(
+            chat_id=chat_id,
+            message_id=message_id,
+            disable_notification=True  # Don't notify channel subscribers
+        )
+        logger.info(f"[SSX GHOST DRIVE] Pinned backup message {message_id}")
+        return True
+    except Exception as e:
+        # SAFETY: If pin fails (no permissions), backup still exists in history
+        logger.warning(
+            f"[SSX GHOST DRIVE] Failed to pin message {message_id}: {_safe_error_message(e)}. "
+            f"Backup exists in channel history but won't be auto-loaded."
+        )
+        return False
 
 
 def load_from_ghost_drive(bot: Any) -> Tuple[bool, str]:
     """
     Load user data from the Ghost Drive (Telegram Channel backup).
     
-    Searches the DATABASE_CHANNEL_ID for the most recent backup document
-    and restores it to the local userdata file. Supports both compressed
-    (.gz) and uncompressed JSON backups for backwards compatibility.
+    Uses the "Pinned Reference" strategy: directly retrieves the document
+    from the pinned message via getChat API. This is more efficient than
+    searching chat history.
+    
+    Fallback: If no pinned message exists, falls back to searching chat history.
+    If no backup is found at all, returns immediately to trigger local file load.
     
     Security Features:
     - 10MB size limit to prevent JSON bomb / memory exhaustion
     - JSON validation before loading
     - Path sanitization in error messages
+    - Specific exception handling (not bare Exception)
     
     Args:
         bot: The Telegram bot instance for API calls.
@@ -494,6 +536,8 @@ def load_from_ghost_drive(bot: Any) -> Tuple[bool, str]:
         >>> if success:
         ...     print(f"Restored from backup: {msg}")
     """
+    import requests as _requests
+    
     from tgbotmodules.spidermodules.generalcfg import (
         DATABASE_CHANNEL_ID,
         GHOST_DRIVE_BACKUP_PREFIX
@@ -506,29 +550,54 @@ def load_from_ghost_drive(bot: Any) -> Tuple[bool, str]:
     try:
         chat_id = int(DATABASE_CHANNEL_ID)
         
-        # Fetch recent messages with documents from the channel via Bot API
-        # PTB v20 ExtBot doesn't have get_chat_history, use API directly
+        # =================================================================
+        # SUBAGENT 2.1: PINNED REFERENCE STRATEGY
+        # Use getChat API to directly retrieve pinned message document
+        # =================================================================
         bot_token = _get_bot_token_from_bot(bot)
-        messages_data = _get_chat_history_via_api(bot_token, chat_id, limit=100)
         
-        # Find the latest backup document
-        latest_backup = None
-        latest_date = None
+        # Try to get pinned message first (fast path)
+        pinned_result = _get_pinned_message_document(bot_token, chat_id)
         
-        for msg in messages_data:
-            if msg.get("document"):
-                caption = msg.get("caption", "")
-                if GHOST_DRIVE_BACKUP_PREFIX in caption:
-                    msg_date = msg.get("date", 0)
-                    if latest_date is None or msg_date > latest_date:
-                        latest_backup = msg
-                        latest_date = msg_date
+        backup_source = None
         
-        if not latest_backup:
-            return (False, "No Ghost Drive backup found in channel - first-time setup")
+        if pinned_result:
+            # SUCCESS: Found pinned backup - use it directly
+            msg_id, document = pinned_result
+            backup_source = {"document": document, "caption": f"Pinned backup (msg {msg_id})"}
+            logger.info(f"[SSX GHOST DRIVE] Found pinned backup (msg {msg_id})")
+        else:
+            # FALLBACK: Search chat history for backup
+            logger.info("[SSX GHOST DRIVE] No pinned backup, searching chat history...")
+            
+            messages_data = _get_chat_history_via_api(bot_token, chat_id, limit=100)
+            
+            # Find the latest backup document
+            latest_backup = None
+            latest_date = None
+            
+            for msg in messages_data:
+                if msg.get("document"):
+                    caption = msg.get("caption", "")
+                    if GHOST_DRIVE_BACKUP_PREFIX in caption:
+                        msg_date = msg.get("date", 0)
+                        if latest_date is None or msg_date > latest_date:
+                            latest_backup = msg
+                            latest_date = msg_date
+            
+            if not latest_backup:
+                # NO BACKUP FOUND: Return immediately to trigger local file load
+                # No infinite loops - this is the safe exit point
+                logger.info("[SSX GHOST DRIVE] No backup found in channel - using local file")
+                return (False, "No Ghost Drive backup found in channel - first-time setup")
+            
+            backup_source = latest_backup
         
+        # =================================================================
+        # DOWNLOAD AND VALIDATE THE BACKUP
+        # =================================================================
         # Download the document using PTB's get_file
-        file = bot.get_file(file_id=latest_backup["document"]["file_id"])
+        file = bot.get_file(file_id=backup_source["document"]["file_id"])
         
         fd, temp_path = tempfile.mkstemp(suffix='.json', prefix='.ghost_restore_')
         os.close(fd)
@@ -565,9 +634,12 @@ def load_from_ghost_drive(bot: Any) -> Tuple[bool, str]:
             if data is None:
                 try:
                     data = json.loads(file_data.decode('utf-8'))
-                except (json.JSONDecodeError, UnicodeDecodeError) as e:
+                except json.JSONDecodeError as e:
                     logger.error(f"[SSX GHOST DRIVE] Invalid JSON in backup: {_safe_error_message(e)}")
                     return (False, "Corrupted backup file - JSON parse failed")
+                except UnicodeDecodeError as e:
+                    logger.error(f"[SSX GHOST DRIVE] Invalid encoding in backup: {_safe_error_message(e)}")
+                    return (False, "Corrupted backup file - encoding error")
             
             # Validate the loaded data is a dictionary
             if not isinstance(data, dict):
@@ -576,9 +648,9 @@ def load_from_ghost_drive(bot: Any) -> Tuple[bool, str]:
             # Write to local file atomically
             if _atomic_write_json('./userdata/userdata', data):
                 logger.info(
-                    f"[SSX GHOST DRIVE] Successfully restored backup: {latest_backup.caption}"
+                    f"[SSX GHOST DRIVE] Successfully restored backup from: {backup_source.get('caption', 'unknown')}"
                 )
-                return (True, f"Ghost Drive restore successful: {latest_backup.caption}")
+                return (True, f"Ghost Drive restore successful: {backup_source.get('caption', 'pinned')}")
             else:
                 return (False, "Ghost Drive restore failed: atomic write error")
                 
@@ -588,9 +660,12 @@ def load_from_ghost_drive(bot: Any) -> Tuple[bool, str]:
                 
     except ValueError as e:
         return (False, f"Invalid channel ID format: {_safe_error_message(e)}")
-    except Exception as e:
-        logger.error(f"[SSX GHOST DRIVE] Load error: {_safe_error_message(e)}")
-        return (False, f"Ghost Drive load error: {_safe_error_message(e)}")
+    except _requests.RequestException as e:
+        logger.error(f"[SSX GHOST DRIVE] Network error: {_safe_error_message(e)}")
+        return (False, f"Ghost Drive load error: network failure")
+    except json.JSONDecodeError as e:
+        logger.error(f"[SSX GHOST DRIVE] JSON parse error: {_safe_error_message(e)}")
+        return (False, f"Ghost Drive load error: invalid JSON")
 
 
 def _upload_with_backoff(
@@ -599,7 +674,7 @@ def _upload_with_backoff(
     data: dict,
     caption: str,
     max_retries: int = 5
-) -> Tuple[bool, str, int]:
+) -> Tuple[bool, str, int, int]:
     """
     Upload compressed data to Telegram with exponential backoff on rate limits.
     
@@ -608,13 +683,14 @@ def _upload_with_backoff(
     
     Args:
         bot: The Telegram bot instance.
-        chat_id: The target channel chat ID.
+        chat_id: The channel chat ID.
         data: The dictionary data to upload (will be compressed).
         caption: The message caption.
         max_retries: Maximum retry attempts (default: 5).
         
     Returns:
-        Tuple of (success, message, compressed_file_size).
+        Tuple of (success, message, compressed_file_size, message_id).
+        message_id is 0 if upload failed.
     """
     import time
     
@@ -637,11 +713,14 @@ def _upload_with_backoff(
                         caption=caption
                     )
                 
+                # Extract message_id from the returned Message object
+                message_id = msg.message_id if msg else 0
+                
                 logger.info(
                     f"[SSX GHOST DRIVE] Upload successful: {caption} "
-                    f"(compressed: {len(compressed_data)}/{original_size} bytes)"
+                    f"(compressed: {len(compressed_data)}/{original_size} bytes, msg_id: {message_id})"
                 )
-                return (True, caption, len(compressed_data))
+                return (True, caption, len(compressed_data), message_id)
                 
             except Exception as e:
                 error_str = str(e).lower()
@@ -660,7 +739,7 @@ def _upload_with_backoff(
                 # Non-retryable error
                 raise
         
-        return (False, "Max retries exceeded due to rate limiting", len(compressed_data))
+        return (False, "Max retries exceeded due to rate limiting", len(compressed_data), 0)
         
     finally:
         if os.path.exists(temp_path):
@@ -673,7 +752,10 @@ def sync_to_ghost_drive(bot: Any) -> Tuple[bool, str]:
     
     Compresses the local user_data.json using Gzip and uploads it to the
     configured DATABASE_CHANNEL_ID with a timestamped caption. Automatically
-    cleans up old backups to keep the channel storage minimal.
+    pins the backup message and cleans up old backups.
+    
+    SUBAGENT 2.2: After successful upload, pins the message so future loads
+    can use the efficient "Pinned Reference" strategy.
     
     Security Features:
     - asyncio.Lock prevents race conditions from overlapping syncs
@@ -681,6 +763,7 @@ def sync_to_ghost_drive(bot: Any) -> Tuple[bool, str]:
     - Exponential backoff on rate limit (429) errors
     - DEBUG-level emergency logging (no stdout flooding)
     - Atomic writes prevent corruption
+    - Specific exception handling (not bare Exception)
     
     Args:
         bot: The Telegram bot instance for API calls.
@@ -693,6 +776,8 @@ def sync_to_ghost_drive(bot: Any) -> Tuple[bool, str]:
         >>> if success:
         ...     print(f"Backup saved: {msg}")
     """
+    import requests as _requests
+    
     from tgbotmodules.spidermodules.generalcfg import (
         DATABASE_CHANNEL_ID, 
         GHOST_DRIVE_BACKUP_PREFIX
@@ -716,12 +801,21 @@ def sync_to_ghost_drive(bot: Any) -> Tuple[bool, str]:
                 data = json.load(f)
         
         # Upload with compression and backoff
-        success, message, file_size = _upload_with_backoff(
+        # Now returns: (success, message, file_size, message_id)
+        success, message, file_size, message_id = _upload_with_backoff(
             bot, chat_id, data, caption
         )
         
         if success:
-            # Clean up old backups
+            # =================================================================
+            # SUBAGENT 2.2: PIN THE BACKUP MESSAGE
+            # After successful upload, pin it so load_from_ghost_drive can
+            # use the efficient "Pinned Reference" strategy
+            # =================================================================
+            if message_id > 0:
+                _pin_backup_message(bot, chat_id, message_id)
+            
+            # Clean up old backups (keep 2 most recent)
             _cleanup_old_backups(bot, chat_id, keep_count=2)
             
             # Update last sync time for /status command
@@ -733,24 +827,15 @@ def sync_to_ghost_drive(bot: Any) -> Tuple[bool, str]:
             
     except ValueError as e:
         return (False, f"Invalid channel ID format: {_safe_error_message(e)}")
-    except Exception as e:
-        # EMERGENCY LOGGING: Log JSON to DEBUG level only (no stdout flooding)
-        # This preserves data for recovery while keeping logs clean
-        try:
-            with open('./userdata/userdata', 'r') as f:
-                emergency_json = f.read()
-            
-            # Log summary to INFO level
-            logger.warning(f"[SSX GHOST DRIVE] Sync failed: {_safe_error_message(e)}")
-            
-            # Log full JSON to DEBUG only
-            logger.debug(f"[SSX GHOST DRIVE EMERGENCY] Upload failed: {_safe_error_message(e)}")
-            logger.debug(f"[SSX GHOST DRIVE EMERGENCY] JSON DATA (first 1000 chars):\n{emergency_json[:1000]}")
-            logger.debug(f"[SSX GHOST DRIVE EMERGENCY] END JSON DATA (total: {len(emergency_json)} bytes)")
-        except Exception as log_error:
-            logger.warning(f"[SSX GHOST DRIVE] Failed to log emergency data: {_safe_error_message(log_error)}")
-        
-        return (False, f"Ghost Drive sync failed: {_safe_error_message(e)}")
+    except _requests.RequestException as e:
+        logger.warning(f"[SSX GHOST DRIVE] Network error during sync: {_safe_error_message(e)}")
+        return (False, f"Ghost Drive sync failed: network error")
+    except json.JSONDecodeError as e:
+        logger.error(f"[SSX GHOST DRIVE] JSON encode error: {_safe_error_message(e)}")
+        return (False, f"Ghost Drive sync failed: data encoding error")
+    except OSError as e:
+        logger.error(f"[SSX GHOST DRIVE] File system error: {_safe_error_message(e)}")
+        return (False, f"Ghost Drive sync failed: file system error")
 
 
 def _cleanup_old_backups(
