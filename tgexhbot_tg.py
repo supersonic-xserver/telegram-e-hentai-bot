@@ -616,6 +616,17 @@ async def post_init(application: Application) -> None:
     _bot_for_shutdown = application.bot
     
     # =======================================================================
+    # NUCLEAR OPTION: Delete Webhook - Kill old connection completely
+    # This ensures the old bot instance can't receive updates anymore
+    # =======================================================================
+    logger.info("[SSX BOOT] NUCLEAR: Deleting webhook to kill old connections...")
+    try:
+        await application.bot.delete_webhook(drop_pending_updates=True)
+        logger.info("[SSX BOOT] NUCLEAR: Webhook deleted successfully")
+    except Exception as e:
+        logger.warning(f"[SSX BOOT] NUCLEAR: Webhook delete failed (may not be set): {e}")
+    
+    # =======================================================================
     # SSX GHOST DRIVE - Boot Sequence
     # =======================================================================
     # Load the latest backup from the Telegram Vault.
@@ -760,13 +771,13 @@ def main() -> None:
     logger.info("Bot initiating...")
     
     # ===================================================================
-    # CONFLICT DAMPENING
+    # CONFLICT DAMPENING - NUCLEAR OPTION
     # Add delay before polling to let Koyeb kill the previous instance's connection
     # This prevents "Conflict" loop from killing the new instance before it starts
     # ===================================================================
-    logger.info("[SSX BOOT] Waiting 5s for Koyeb to terminate old instance connections...")
+    logger.info("[SSX BOOT] Waiting 10s for Koyeb to terminate old instance connections...")
     import time
-    time.sleep(5)
+    time.sleep(10)
     logger.info("[SSX BOOT] Proceeding with polling...")
     
     # Graceful Exit - wrap polling in try/finally
