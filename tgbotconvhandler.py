@@ -584,9 +584,9 @@ def spiderfunction(logger, spiderDict=None, chat_id=None):
       handle multiple users' result'''
    
    # =======================================================================
-   # DISPATCHER PRE-FLIGHT TYPE CHECK (NUCLEAR SHIELD)
-   # FIX: Validate spiderDict before processing ANY user_data
-   # This prevents "string indices must be integers" errors from reaching dispatcher
+   # METADATA ISOLATION - Filter out _metadata before processing
+   # System metadata is now stored in _metadata sub-dict to prevent namespace pollution
+   # The dispatcher should only process user profile keys (not _metadata)
    # =======================================================================
    if spiderDict is not None:
        # Check if spiderDict itself is corrupted (not a dict)
@@ -594,28 +594,30 @@ def spiderfunction(logger, spiderDict=None, chat_id=None):
            logger.error(f"[SSX DISPATCHER SHIELD] Rejected non-dict spiderDict: type={type(spiderDict)}")
            return {}
        
-       # Check for garbage top-level keys that indicate state corruption
-       # These should be nested under user profiles, not at top level
-       invalid_keys = {'ssx_active', 'timestamp', 'version', 'ghost_drive_init'}
-       garbage_detected = False
-       for key in invalid_keys:
-           if key in spiderDict and not isinstance(spiderDict[key], dict):
-               logger.error(f"[SSX DISPATCHER SHIELD] Detected garbage key '{key}' at top level: "
-                           f"type={type(spiderDict[key])}, value={repr(spiderDict[key])[:100]}")
-               garbage_detected = True
+       # METADATA ISOLATION: Remove _metadata from spiderDict before processing
+       # _metadata contains system fields like timestamp, version, init flags
+       # These are NOT user profiles and should not be processed by the dispatcher
+       if '_metadata' in spiderDict:
+           logger.info("[SSX METADATA ISOLATION] Filtering out _metadata from spiderDict")
+           del spiderDict['_metadata']
        
-       if garbage_detected:
-           logger.error(f"[SSX DISPATCHER SHIELD] Garbage keys detected at top level: {list(spiderDict.keys())[:10]}")
-           # Remove garbage entries to prevent dispatcher crash
-           for key in list(spiderDict.keys()):
-               if key in invalid_keys:
-                   del spiderDict[key]
-                   logger.info(f"[SSX DISPATCHER SHIELD] Removed garbage key: {key}")
-           
-           # If spiderDict is now empty or all garbage, return empty
-           if not spiderDict or len(spiderDict) == 0:
-               logger.warning("[SSX DISPATCHER SHIELD] spiderDict empty after garbage removal, returning empty")
-               return {}
+       # LEGACY GARBAGE FILTER: Remove any legacy top-level garbage keys
+       # These may exist from older backups before metadata isolation was implemented
+       legacy_invalid_keys = {'ssx_active', 'timestamp', 'version', 'ghost_drive_init', 'init', 'last_sync_timestamp', 'sync_version'}
+       garbage_removed = False
+       for key in list(spiderDict.keys()):
+           if key in legacy_invalid_keys:
+               logger.info(f"[SSX LEGACY CLEANUP] Removing legacy garbage key: {key}")
+               del spiderDict[key]
+               garbage_removed = True
+       
+       if garbage_removed:
+           logger.info(f"[SSX LEGACY CLEANUP] SpiderDict keys after cleanup: {list(spiderDict.keys())[:10]}")
+       
+       # If spiderDict is now empty, return empty
+       if not spiderDict or len(spiderDict) == 0:
+           logger.info("[SSX DISPATCHER] spiderDict empty after metadata filtering, returning empty")
+           return {}
    
    # =======================================================================
    # MASSIVE TRY/EXCEPT ERROR TRAP

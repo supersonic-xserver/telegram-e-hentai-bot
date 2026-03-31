@@ -235,9 +235,11 @@ def userfiledetect() -> dict:
         if file_size == 0:
             logger.warning("[SSX DATASTORE] Empty userdata file detected, writing minimum viable data")
             _atomic_write_json(userdata_path, {
-                "init": "ssx_active",
-                "timestamp": time.time(),
-                "version": "2.0"
+                "_metadata": {
+                    "init": "ssx_active",
+                    "timestamp": time.time(),
+                    "version": "2.0"
+                }
             })
             statusdict['iscorrect'] = False  # Flag as fresh init
         
@@ -626,11 +628,14 @@ def load_from_ghost_drive(bot: Any) -> Tuple[bool, str]:
             if local_empty:
                 logger.warning("[SSX GHOST DRIVE] Local file is empty - will force new backup creation on first sync")
                 # Initialize a minimal userdata file to prevent empty file issues
+                # METADATA ISOLATION: Store system fields in _metadata sub-dict
                 _atomic_write_json(LOCAL_FILE, {
-                    "init": "ssx_active",
-                    "timestamp": time.time(),
-                    "version": "2.0",
-                    "ghost_drive_init": True
+                    "_metadata": {
+                        "init": "ssx_active",
+                        "timestamp": time.time(),
+                        "version": "2.0",
+                        "ghost_drive_init": True
+                    }
                 })
             
             return (False, "No Ghost Drive backup found - will create new backup on first sync")
@@ -973,10 +978,17 @@ def sync_to_ghost_drive(bot: Any) -> Tuple[bool, str]:
             with open('./userdata/userdata', 'r') as f:
                 data = json.load(f)
         
+        # METADATA ISOLATION: Update metadata timestamp before sync
+        if '_metadata' not in data:
+            data['_metadata'] = {}
+        data['_metadata']['last_sync_timestamp'] = time.time()
+        data['_metadata']['sync_version'] = '2.0'
+        
         # Empty file safeguard - prevent uploading 0-byte files
-        if not data or len(data) < 5:
-            logger.warning("[SSX GHOST] Data too small to sync. Skipping to prevent API crash.")
-            return (False, "Data too small or empty - sync aborted")
+        # Now we only check if the file is truly empty (no _metadata either)
+        if not data or (len(data) == 1 and '_metadata' in data):
+            logger.warning("[SSX GHOST] Data is empty (only _metadata). Skipping to prevent API crash.")
+            return (False, "Data empty - sync aborted")
         
         # Upload with compression and backoff
         success, message, file_size, message_id = _upload_with_backoff(
@@ -1196,3 +1208,157 @@ def get_mod_logs(limit: int = 100) -> list:
     userdata = getspiderinfo()
     logs = userdata.get('mod_logs', [])
     return logs[-limit:] if len(logs) > limit else logs
+
+
+# =======================================================================
+# METADATA ISOLATION - Validation and Migration Helpers
+# =======================================================================
+# These functions help maintain clean separation between user profiles
+# and system metadata in the userdata namespace.
+# =======================================================================
+
+def validate_userdata_keys(userdata: dict) -> Tuple[bool, list]:
+    """
+    Validate that userdata only contains valid keys (profiles or _metadata).
+    
+    This function checks that:
+    1. _metadata exists as a dict (or is the only key)
+    2. All other keys are user profiles (dict type)
+    3. No legacy garbage keys at top level
+    
+    Args:
+        userdata: The userdata dictionary to validate
+        
+    Returns:
+        Tuple of (is_valid, list of issues)
+    """
+    issues = []
+    
+    if not isinstance(userdata, dict):
+        return (False, ["userdata is not a dict"])
+    
+    # Check for legacy garbage keys
+    legacy_keys = {'ssx_active', 'timestamp', 'version', 'ghost_drive_init', 'init', 
+                   'last_sync_timestamp', 'sync_version'}
+    for key in legacy_keys:
+        if key in userdata:
+            issues.append(f"Legacy garbage key found: '{key}'")
+    
+    # Check _metadata
+    if '_metadata' in userdata:
+        if not isinstance(userdata['_metadata'], dict):
+            issues.append("_metadata exists but is not a dict")
+    
+    # Check that all non-metadata keys are user profiles (dicts)
+    for key, value in userdata.items():
+        if key == '_metadata':
+            continue
+        if not isinstance(value, dict):
+            issues.append(f"Non-dict value at key '{key}': {type(value).__name__}")
+    
+    return (len(issues) == 0, issues)
+
+
+def migrate_legacy_userdata(filepath: str = './userdata/userdata') -> bool:
+    """
+    Migrate legacy userdata with top-level garbage keys to the new _metadata format.
+    
+    This function:
+    1. Reads the current userdata
+    2. Extracts any top-level metadata fields
+    3. Moves them into a _metadata sub-dict
+    4. Writes the cleaned data back
+    
+    Args:
+        filepath: Path to the userdata JSON file
+        
+    Returns:
+        True if migration was performed, False if not needed or failed
+    """
+    try:
+        with _userdata_lock:
+            with open(filepath, 'r') as f:
+                data = json.load(f)
+        
+        # Check if migration is needed
+        legacy_keys = {'ssx_active', 'timestamp', 'version', 'ghost_drive_init', 'init',
+                       'last_sync_timestamp', 'sync_version'}
+        needs_migration = any(key in data for key in legacy_keys)
+        
+        if not needs_migration:
+            logger.info("[SSX MIGRATION] No legacy metadata found, migration not needed")
+            return False
+        
+        logger.warning("[SSX MIGRATION] Legacy metadata detected, initiating migration...")
+        
+        # Extract metadata
+        metadata = {}
+        for key in legacy_keys:
+            if key in data:
+                metadata[key] = data[key]
+                del data[key]
+                logger.info(f"[SSX MIGRATION] Moved '{key}' to _metadata")
+        
+        # Ensure _metadata exists
+        if '_metadata' not in data:
+            data['_metadata'] = {}
+        
+        # Merge extracted metadata into _metadata
+        data['_metadata'].update(metadata)
+        
+        # Write back atomically
+        if _atomic_write_json(filepath, data):
+            logger.info(f"[SSX MIGRATION] Successfully migrated {len(metadata)} legacy keys to _metadata")
+            return True
+        else:
+            logger.error("[SSX MIGRATION] Failed to write migrated data")
+            return False
+            
+    except Exception as e:
+        logger.error(f"[SSX MIGRATION] Migration failed: {_safe_error_message(e)}")
+        return False
+
+
+def get_metadata() -> Optional[dict]:
+    """
+    Get the current metadata from userdata.
+    
+    Returns:
+        The _metadata dict if it exists, None otherwise
+    """
+    try:
+        with _userdata_lock:
+            with open('./userdata/userdata', 'r') as f:
+                data = json.load(f)
+        return data.get('_metadata')
+    except Exception:
+        return None
+
+
+def update_metadata(updates: dict) -> bool:
+    """
+    Update specific fields in the metadata.
+    
+    This is the safe way to update metadata - it only modifies
+    the _metadata sub-dict and preserves all user profiles.
+    
+    Args:
+        updates: Dictionary of metadata fields to update
+        
+    Returns:
+        True if successful, False otherwise
+    """
+    try:
+        with _userdata_lock:
+            with open('./userdata/userdata', 'r') as f:
+                data = json.load(f)
+            
+            if '_metadata' not in data:
+                data['_metadata'] = {}
+            
+            data['_metadata'].update(updates)
+            
+            return _atomic_write_json('./userdata/userdata', data)
+    except Exception as e:
+        logger.error(f"[SSX METADATA] Update failed: {_safe_error_message(e)}")
+        return False
