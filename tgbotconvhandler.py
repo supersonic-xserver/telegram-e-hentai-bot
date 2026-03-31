@@ -12,8 +12,6 @@ from tgbotmodules.spidermodules import generalcfg
 from tgbotmodules import searchoptgen 
 from io import BytesIO 
 
-
-  
 def verify(inputStr, user_data, chat_data, logger):
    outputTextList = []
    stored_passcode = generalcfg.passcode
@@ -557,6 +555,16 @@ def spiderfunction(logger, spiderDict=None, chat_id=None):
        sleep = generator.Sleep(sleepstr=generalcfg.searchInterval)
 
        for sd in spiderDict:
+          # ===================================================================
+          # DISPATCHER SHIELDING (azuriteshift assist)
+          # Verify spiderDict[sd] is actually a dict before calling .get()
+          # This prevents AttributeError when hitting string orphans
+          # ===================================================================
+          if not isinstance(spiderDict.get(sd), dict):
+             logger.warning("Dispatcher skipping garbage entry '%s' at key '%s'", 
+                           str(spiderDict.get(sd)), str(sd))
+             continue
+          
           tempChat_idList = []
           # Use .get() for safety to prevent KeyError if dict is malformed
           if spiderDict[sd].get('resultToChat') == True and spiderDict[sd].get('chat_id'):
