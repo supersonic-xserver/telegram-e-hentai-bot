@@ -18,18 +18,18 @@ def verify(inputStr, user_data, chat_data, logger):
    user_input = inputStr.strip() if inputStr else ""
    
    admin_id = os.environ.get("TG_ADMIN_ID", "").strip()
-   user_id = user_data.get('user_id', '')
+   user_id = user_data.get('user_id', '') if isinstance(user_data, dict) else ''
    is_admin = admin_id and str(user_id) == admin_id
    
    # ===================================================================
-   # VERIFY INDEX FIX (azuriteshift assist)
-   # Ensure user_data is a dict before accessing string indices
-   # Handle malformed/corrupted userdata gracefully
+   # SELF-HEALING AUTH GUARD (azuriteshift assist)
+   # Check if user_data is a raw string instead of a dict
+   # If corrupted (raw string from old bug), nuke it and rebuild
    # ===================================================================
    if not isinstance(user_data, dict):
-      logger.error("Malformed user_data detected in verify: type=%s, value=%s", 
-                   type(user_data).__name__, str(user_data)[:200])
-      user_data = {}  # Reset to empty dict to prevent AttributeError/TypeError
+      logger.error("Self-healing: user_data is corrupted (type=%s), resetting to empty dict", 
+                   type(user_data).__name__)
+      user_data = {}
    
    if is_admin or user_input == stored_passcode:
       statusdict = userdatastore.userfiledetect()
