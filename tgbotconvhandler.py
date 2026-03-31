@@ -51,13 +51,16 @@ def verify(inputStr, user_data, chat_data, logger, context=None):
    # This satisfies the Telegram library's requirement for the key
    # to exist in user_data during the verify process.
    # The Spider will blacklist this key to prevent crawling.
+   # 
+   # Using setdefault() for library-friendly key injection:
+   # - Only sets if key doesn't exist (idempotent)
+   # - Returns existing value if key exists (safe)
    # ===================================================================
-   # Immediate assignment to satisfy the library bouncer
-   _temp_un = user_data.get('actualusername')
-   if not _temp_un:
-       _temp_un = str(user_data.get('chat_id', ''))
+   # Get the actual username from existing data or chat_id fallback
+   _temp_un = user_data.get('actualusername') or str(user_data.get('chat_id', ''))
+   # Use setdefault to inject safely (library-friendly)
    if _temp_un:
-       user_data['actualusername'] = _temp_un
+       user_data.setdefault('actualusername', _temp_un)
    
    # Now we can safely access user_data as a dict
    admin_id = os.environ.get("TG_ADMIN_ID", "").strip()

@@ -350,6 +350,17 @@ def getspiderinfo() -> dict:
         with open('./userdata/userdata', 'r') as fo:
             spiderInfoDict.update(json.load(fo))
     
+    # ===================================================================
+    # SSX PERSISTENCE INJECTION - Ensure actualusername exists in every profile
+    # This satisfies the Telegram library's requirement when user_data is loaded
+    # from disk. The library may check for 'actualusername' before our code runs.
+    # ===================================================================
+    for username_key, profile_data in spiderInfoDict.items():
+        if isinstance(profile_data, dict):
+            # Only inject into user profiles (dict type), skip _metadata
+            if username_key != '_metadata':
+                profile_data.setdefault('actualusername', username_key)
+    
     return spiderInfoDict
 
 
