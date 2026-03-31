@@ -122,20 +122,24 @@ def verify(inputStr, user_data, chat_data, logger, context=None):
       chat_id = user_data.get('chat_id')
       
       if actusername and chat_id:
-          user_data[actusername] = {
-              'actualusername': actusername,
-              'state': 'ssx_active',
-              'init': 'ssx_active',
-              'timestamp': time.time(),
-              'userkey': user_data.get('userkey', '')
-          }
           # ===================================================================
-          # SSX ROOT CLEANUP - Remove orphan keys from root level
+          # SSX PROFILE INITIALIZATION - Ensure nested dict exists
+          # Initialize the profile dict if not already present
+          # ===================================================================
+          if actusername not in user_data:
+              user_data[actusername] = {}
+          
+          # ===================================================================
+          # SSX NESTED STORAGE - Store ALL fields inside the profile
           # The Spider sees root-level keys as "drawers" to crawl
-          # These fields belong INSIDE the profile, not at root
+          # All user data belongs INSIDE the profile, not at root
           # ===================================================================
-          user_data.pop('actualusername', None)
-          user_data.pop('userkey', None)
+          user_data[actusername]['actualusername'] = actusername
+          user_data[actusername]['userkey'] = user_data[actusername].get('userkey', '')
+          user_data[actusername]['state'] = 'ssx_active'
+          user_data[actusername]['init'] = 'ssx_active'
+          user_data[actusername]['timestamp'] = time.time()
+          
           logger.info(f"[SSX VERIFY] Profile created for {actusername} (key={actusername}, chat_id={chat_id})")
       
       # PERSIST PROFILE TO DISK - Save user_data to userdata.json
@@ -149,13 +153,19 @@ def verify(inputStr, user_data, chat_data, logger, context=None):
           except Exception as e:
               logger.error(f"[SSX VERIFY] Failed to persist profile: {e}")
       
-      logger.info("Identity of %s verified", user_data.get('actualusername', 'unknown'))
+      # ===================================================================
+      # SSX IDENTITY LOCK - Use local actusername variable for logging
+      # After profile creation, user_data['actualusername'] may have been
+      # moved inside the nested dict. Use local variable to ensure
+      # "unknown" never appears in logs.
+      # ===================================================================
+      logger.info("Identity of %s verified", actusername if actusername else 'unknown')
       chat_data.update({"fromadvcreate": False, "fromedit": False, "fromguide": False})
-      currentuserdata = userdatastore.dataretrive(actusername=user_data.get('actualusername', 'unknown'))
+      currentuserdata = userdatastore.dataretrive(actusername=actusername if actusername else 'unknown')
       outputTextGeneralInfo = replytext.GeneralInfo.format(len(currentuserdata), generalcfg.maxiumprofile)
       outputTextList.append(outputTextGeneralInfo)
       if len(currentuserdata) >= generalcfg.maxiumprofile:
-         logger.info("User %s has %d profile(s), excess or equal to the maxium profiles limitation.", user_data.get('actualusername', 'unknown'), len(currentuserdata))
+         logger.info("User %s has %d profile(s), excess or equal to the maxium profiles limitation.", actusername if actusername else 'unknown', len(currentuserdata))
          outputTextProfileExcessVerify = replytext.ProfileExcessVerify.format(generalcfg.maxiumprofile) 
          outputTextList.append(outputTextProfileExcessVerify)
          chat_data.update({'profileover': True, 'state': 'advance'})
