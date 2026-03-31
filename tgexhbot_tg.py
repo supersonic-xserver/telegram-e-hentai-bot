@@ -592,13 +592,27 @@ async def post_init(application: Application) -> None:
     else:
         logger.info("[SSX GHOST DRIVE] Not configured - DATABASE_CHANNEL_ID not set")
 
-
 async def _ghost_sync_job(context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Periodic Ghost Drive sync job wrapper."""
-    loop = asyncio.get_event_loop()
-    await loop.run_in_executor(
-        None, userdatastore.sync_to_ghost_drive, context.bot
-    )
+    """
+    Safe Ghost Drive sync job.
+    
+    Catches all exceptions to prevent loop closure.
+    Logs errors without stopping the application.
+    """
+    try:
+        loop = asyncio.get_event_loop()
+        success, message = await loop.run_in_executor(
+            None, userdatastore.sync_to_ghost_drive, context.bot
+        )
+        if success:
+            logger.info(f"[SSX GHOST] Sync: {message}")
+        else:
+            # Non-critical failure - log but don't crash
+            logger.warning(f"[SSX GHOST] Sync failed (loop preserved): {message}")
+    except Exception as e:
+        # CRITICAL: Catch ALL exceptions to preserve loop
+        logger.error(f"[SSX CRITICAL] Background sync failed but loop preserved: {e}")
+        # DO NOT re-raise - loop continues running
 
 
 def main() -> None:
@@ -669,9 +683,11 @@ def main() -> None:
     
     logger.info("Bot initiating...")
     
-    # Run with polling (original behavior)
+    # Run with polling - close_loop=False prevents "event loop closed" errors
+    # from background tasks (like health check server thread) from killing the main loop
     application.run_polling(
-        allowed_updates=Update.ALL_TYPES
+        allowed_updates=Update.ALL_TYPES,
+        close_loop=False  # Keep loop alive even if background tasks have issues
     )
 
 
