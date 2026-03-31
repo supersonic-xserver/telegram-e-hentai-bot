@@ -343,12 +343,25 @@ async def state_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
     
     inputStr = update.message.text
     context.user_data.update({'chat_id': update.message.chat_id})
+    
+    # Pass context to messageanalyze for nuclear state clearing support
     outputDict = messageanalyze(
         inputStr=inputStr,
         user_data=context.user_data,
         chat_data=context.chat_data,
-        logger=logger
+        logger=logger,
+        context=context
     )
+    
+    # Check for end_conversation signal from verify() (nuclear reset)
+    if outputDict.get("end_conversation"):
+        logger.info("[SSX STATE] end_conversation signal received - forcing conversation end")
+        context.user_data.clear()
+        context.chat_data.clear()
+        for text in outputDict["outputTextList"]:
+            await update.message.reply_text(text=text)
+        return ConversationHandler.END
+    
     context.user_data.update(outputDict["outputUser_data"])
     context.chat_data.update(outputDict["outputChat_data"])
     
@@ -510,10 +523,47 @@ async def error(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     
     Detects RuntimeError from event loop issues and logs
     for recovery without crashing the dispatcher.
+    
+    NUCLEAR STATE CLEAR on "string indices" errors
+    When "string indices must be integers" error is caught, force full state reset
+    to prevent corrupted state from affecting subsequent operations.
     """
     global _loop_healthy
     
     error_msg = str(context.error) if context.error else "Unknown error"
+    
+    # ===================================================================
+    # NUCLEAR STATE CLEAR ON STRING INDICES ERROR
+    # If "string indices must be integers" error occurs, clear ALL state
+    # This prevents corrupted data from affecting subsequent operations
+    # ===================================================================
+    if "string indices must be integers" in error_msg:
+        logger.error("[SSX ERROR HANDLER] String indices error - NUCLEAR state clear initiated")
+        
+        # NUCLEAR: Clear ALL conversation state
+        if hasattr(context, 'user_data'):
+            context.user_data.clear()
+            logger.info("[SSX ERROR HANDLER] user_data cleared")
+        if hasattr(context, 'chat_data'):
+            context.chat_data.clear()
+            logger.info("[SSX ERROR HANDLER] chat_data cleared")
+        if hasattr(context, 'bot_data'):
+            context.bot_data.clear()
+            logger.info("[SSX ERROR HANDLER] bot_data cleared")
+        
+        # Try to notify user if update contains message
+        try:
+            if update and hasattr(update, 'message') and update.message:
+                await update.message.reply_text(
+                    "⚠️ Critical state error detected and cleared.\n"
+                    "Please restart with /start"
+                )
+                logger.info("[SSX ERROR HANDLER] User notified of state clear")
+        except Exception as notify_err:
+            logger.error(f"[SSX ERROR HANDLER] Could not notify user: {notify_err}")
+        
+        # DO NOT re-raise - let dispatcher continue with clean state
+        return
     
     # Detect event loop issues
     if isinstance(context.error, RuntimeError) and 'event loop' in error_msg.lower():
@@ -823,9 +873,9 @@ def main() -> None:
     # Add delay before polling to let Koyeb kill the previous instance's connection
     # This prevents "Conflict" loop from killing the new instance before it starts
     # ===================================================================
-    logger.info("[SSX BOOT] Waiting 10s for Koyeb to terminate old instance connections...")
+    logger.info("[SSX BOOT] Waiting 30s for Koyeb to terminate old instance connections...")
     import time
-    time.sleep(10)
+    time.sleep(30)
     logger.info("[SSX BOOT] Proceeding with polling...")
     
     # Graceful Exit - wrap polling in try/finally

@@ -12,27 +12,38 @@ from tgbotmodules.spidermodules import generalcfg
 from tgbotmodules import searchoptgen 
 from io import BytesIO 
 
-def verify(inputStr, user_data, chat_data, logger):
+def verify(inputStr, user_data, chat_data, logger, context=None):
    outputTextList = []
    stored_passcode = generalcfg.passcode
    user_input = inputStr.strip() if inputStr else ""
    
    # ===================================================================
-   # TYPE SHIELD - CRITICAL SECURITY CHECK
+   # TYPE SHIELD - CRITICAL SECURITY CHECK (NUCLEAR RESET)
    # If user_data is NOT a dict (e.g., corrupted string), this prevents:
    # - "string indices must be integers" errors
    # - Authentication bypass via malformed data
    # - Dispatcher crashes from garbage entries
+   # FIX: Clear ALL context state to prevent corrupted data from reaching dispatcher
    # ===================================================================
    if not isinstance(user_data, dict):
-      logger.warning(f"[SSX AUTH] user_data is corrupted (type={type(user_data).__name__}). "
-                     f"Resetting state to allow fresh login.")
-      user_data = {}
-      chat_data.update({'state': 'verify'})
-      outputTextList.append("Session reset. Please enter your password again.")
-      return {"outputTextList": outputTextList,
-              "outputChat_data": chat_data, 
-              "outputUser_data": user_data}
+      logger.error(f"[SSX TYPE SHIELD] user_data is corrupted (type={type(user_data).__name__}). "
+                   f"NUCLEAR state clear initiated.")
+      
+      # NUCLEAR: Clear ALL conversation state
+      if context:
+         context.user_data.clear()
+         context.chat_data.clear()
+         context.bot_data.clear()
+      
+      # Force conversation end - do NOT proceed with corrupted data
+      outputTextList.append("⚠️ Session corruption detected and cleared.\nPlease restart with /start")
+      
+      return {
+          "outputTextList": outputTextList,
+          "outputChat_data": {"state": "END"},  # Force end
+          "outputUser_data": {},
+          "end_conversation": True  # Signal to end conversation
+      }
    
    # Now we can safely access user_data as a dict
    admin_id = os.environ.get("TG_ADMIN_ID", "").strip()
@@ -40,10 +51,10 @@ def verify(inputStr, user_data, chat_data, logger):
    is_admin = admin_id and str(user_id) == admin_id
    
    # ===================================================================
-   # DATABASE SURGERY - SELF-HEALING GUARD
+   # DATABASE SURGERY - SELF-HEALING GUARD (SYNCHRONOUS)
    # Check if chat_id data in persistent userdata is corrupted (string instead of dict)
    # This fixes accounts stuck in string format from previous bugs
-   # Reset any corrupted user profile to empty dict so user can log in fresh
+   # FIX: Synchronous surgery with immediate state reset and re-login requirement
    # ===================================================================
    chat_id = user_data.get('chat_id')
    if chat_id:
@@ -57,13 +68,42 @@ def verify(inputStr, user_data, chat_data, logger):
                with open(_userdata_path, 'r') as f:
                    persisted_userdata = _json.load(f)
                if chat_id in persisted_userdata and not isinstance(persisted_userdata[chat_id], dict):
-                   logger.warning(f"[SSX AUTH] Corrupted string data found for {chat_id}. Resetting to dict.")
+                   logger.warning(f"[SSX DATABASE SURGERY] Corrupted string data found for {chat_id}. "
+                                  f"Fixing synchronously and forcing re-login.")
+                   
+                   # CRITICAL: Save synchronously BEFORE continuing
                    persisted_userdata[chat_id] = {}
                    with open(_userdata_path, 'w') as f:
                        _json.dump(persisted_userdata, f)
+                   
+                   # NUCLEAR: Also clear runtime state
+                   if context:
+                       context.user_data.clear()
+                       context.chat_data.clear()
+                   
+                   # Force user to re-login
+                   outputTextList.append("⚠️ Corrupted profile detected and repaired.\nPlease login again with /start")
+                   return {
+                       "outputTextList": outputTextList,
+                       "outputChat_data": {"state": "END"},  # Force end
+                       "outputUser_data": {},
+                       "end_conversation": True  # Signal to end conversation
+                   }
        except Exception as e:
-           logger.warning(f"[SSX AUTH] Could not check persistent userdata: {e}")
+           logger.error(f"[SSX DATABASE SURGERY] Failed: {e}")
+           # If surgery fails, still prevent dispatcher access
+           if context:
+               context.user_data.clear()
+               context.chat_data.clear()
+           outputTextList.append("⚠️ Database error - please contact admin")
+           return {
+               "outputTextList": outputTextList,
+               "outputChat_data": {"state": "END"},
+               "outputUser_data": {},
+               "end_conversation": True
+           }
    
+   # Normal verification flow continues with clean state
    if is_admin or user_input == stored_passcode:
       statusdict = userdatastore.userfiledetect()
       if statusdict['isfile'] == False:
@@ -544,6 +584,40 @@ def spiderfunction(logger, spiderDict=None, chat_id=None):
       handle multiple users' result'''
    
    # =======================================================================
+   # DISPATCHER PRE-FLIGHT TYPE CHECK (NUCLEAR SHIELD)
+   # FIX: Validate spiderDict before processing ANY user_data
+   # This prevents "string indices must be integers" errors from reaching dispatcher
+   # =======================================================================
+   if spiderDict is not None:
+       # Check if spiderDict itself is corrupted (not a dict)
+       if not isinstance(spiderDict, dict):
+           logger.error(f"[SSX DISPATCHER SHIELD] Rejected non-dict spiderDict: type={type(spiderDict)}")
+           return {}
+       
+       # Check for garbage top-level keys that indicate state corruption
+       # These should be nested under user profiles, not at top level
+       invalid_keys = {'ssx_active', 'timestamp', 'version', 'ghost_drive_init'}
+       garbage_detected = False
+       for key in invalid_keys:
+           if key in spiderDict and not isinstance(spiderDict[key], dict):
+               logger.error(f"[SSX DISPATCHER SHIELD] Detected garbage key '{key}' at top level: "
+                           f"type={type(spiderDict[key])}, value={repr(spiderDict[key])[:100]}")
+               garbage_detected = True
+       
+       if garbage_detected:
+           logger.error(f"[SSX DISPATCHER SHIELD] Garbage keys detected at top level: {list(spiderDict.keys())[:10]}")
+           # Remove garbage entries to prevent dispatcher crash
+           for key in list(spiderDict.keys()):
+               if key in invalid_keys:
+                   del spiderDict[key]
+                   logger.info(f"[SSX DISPATCHER SHIELD] Removed garbage key: {key}")
+           
+           # If spiderDict is now empty or all garbage, return empty
+           if not spiderDict or len(spiderDict) == 0:
+               logger.warning("[SSX DISPATCHER SHIELD] spiderDict empty after garbage removal, returning empty")
+               return {}
+   
+   # =======================================================================
    # MASSIVE TRY/EXCEPT ERROR TRAP
    # Catches ALL exceptions and sends ERROR MESSAGE directly to user
    # This prevents silent failures and tells you WHY it crashed
@@ -675,7 +749,7 @@ def spiderfunction(logger, spiderDict=None, chat_id=None):
        return {}  # Return empty dict so bot continues running
 
 
-def messageanalyze(inputStr=None, user_data=None, chat_data=None, logger=None):
+def messageanalyze(inputStr=None, user_data=None, chat_data=None, logger=None, context=None):
    '''This function controls the interaction between user and bot. The basic working
       method of this function is that the upper layers provide the user input, status
       and user information. Then, this function would exploit a suitable sub function
@@ -695,9 +769,19 @@ def messageanalyze(inputStr=None, user_data=None, chat_data=None, logger=None):
                       'advedit': advedit,
                       'delete': delete
                      }
-   outputDict = messageFuncDict[chat_data['state']](inputStr=inputStr, 
-                                                    user_data=user_data, 
-                                                    chat_data=chat_data,
-                                                    logger=logger
-                                                   )
+   
+   # Pass context only to verify function (which needs it for nuclear state clearing)
+   if chat_data['state'] == 'verify':
+       outputDict = messageFuncDict['verify'](inputStr=inputStr, 
+                                               user_data=user_data, 
+                                               chat_data=chat_data,
+                                               logger=logger,
+                                               context=context
+                                              )
+   else:
+       outputDict = messageFuncDict[chat_data['state']](inputStr=inputStr, 
+                                                        user_data=user_data, 
+                                                        chat_data=chat_data,
+                                                        logger=logger
+                                                       )
    return outputDict
