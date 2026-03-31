@@ -187,6 +187,8 @@ def _atomic_write_json(filepath: str, data: dict) -> bool:
 def userfiledetect() -> dict:
     """Detect user data file status and create if needed.
     
+    Added Minimum Viable Data check - ensures file is not 0 bytes.
+    
     If the userdata file doesn't exist or is corrupted, this creates
     a fresh file and backs up the broken one for analysis.
     
@@ -204,6 +206,25 @@ def userfiledetect() -> dict:
         elif not os.path.isfile('./userdata/userdata'):
             statusdict['isfile'] = False
             _atomic_write_json('./userdata/userdata', {})
+        
+        # Minimum Viable Data check - ensure file is not 0 bytes
+        userdata_path = './userdata/userdata'
+        file_size = 0
+        try:
+            if os.path.exists(userdata_path):
+                file_size = os.path.getsize(userdata_path)
+        except OSError:
+            pass
+        
+        # If file is empty (0 bytes), write a minimum viable init
+        if file_size == 0:
+            logger.warning("[SSX DATASTORE] Empty userdata file detected, writing minimum viable data")
+            _atomic_write_json(userdata_path, {
+                "init": "ssx_active",
+                "timestamp": time.time(),
+                "version": "2.0"
+            })
+            statusdict['iscorrect'] = False  # Flag as fresh init
         
         try:
             with open('./userdata/userdata', 'r') as fo:

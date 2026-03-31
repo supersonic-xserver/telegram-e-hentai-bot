@@ -28,7 +28,7 @@ print(f"[SSX DEBUG] sys.path = {sys.path}")
 # SSX BOT DESCRIPTION
 # =======================================================================
 """
-SSX Zero-Bug Hardening:
+SSX Hardening:
 - Fully async/await architecture for v20+
 - SIGINT/SIGTERM signal handlers for graceful shutdown
 - Database flush before exit
@@ -616,17 +616,27 @@ async def post_init(application: Application) -> None:
     else:
         logger.info("[SSX GHOST DRIVE] Not configured - DATABASE_CHANNEL_ID not set")
 
+# Thread pool for isolated background jobs
+import concurrent.futures
+_ghost_executor = concurrent.futures.ThreadPoolExecutor(max_workers=1, thread_name_prefix="SSX-Ghost")
+
 async def _ghost_sync_job(context: ContextTypes.DEFAULT_TYPE) -> None:
     """
-    Safe Ghost Drive sync job.
+    Ghost Drive sync job - thread-isolated.
+    
+    Runs in a separate thread pool executor so a "Sync Crash"
+    cannot touch the "Command Dispatcher" event loop.
     
     Catches all exceptions to prevent loop closure.
     Logs errors without stopping the application.
     """
     try:
         loop = asyncio.get_event_loop()
+        # Use dedicated thread executor to isolate from main loop
         success, message = await loop.run_in_executor(
-            None, userdatastore.sync_to_ghost_drive, context.bot
+            _ghost_executor,  # Dedicated thread pool - crashes don't affect main loop
+            userdatastore.sync_to_ghost_drive, 
+            context.bot
         )
         if success:
             logger.info(f"[SSX GHOST] Sync: {message}")
@@ -715,11 +725,13 @@ def main() -> None:
     
     logger.info("Bot initiating...")
     
-    # Run with polling - close_loop=False prevents "event loop closed" errors
-    # from background tasks (like health check server thread) from killing the main loop
+    # Run with polling - drop_pending_updates clears conflicts with old instances
+    # close_loop=False prevents "event loop closed" errors from killing the main loop
     application.run_polling(
         allowed_updates=Update.ALL_TYPES,
-        close_loop=False  # Keep loop alive even if background tasks have issues
+        drop_pending_updates=True,  # Clear conflicts with old instances
+        close_loop=False,           # Keep loop alive even if background tasks have issues
+        timeout=10                  # Shorter timeout for faster redeploy
     )
 
 
