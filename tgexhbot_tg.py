@@ -80,6 +80,16 @@ logger = logging.getLogger(__name__)
 
 
 # =======================================================================
+# SSX LOG INJECTION FIX - Safe Log Helper
+# =======================================================================
+def _safe_log(value: str) -> str:
+    """Strip newlines from user-supplied strings before logging (prevent log injection)."""
+    if not isinstance(value, str):
+        return repr(value)
+    return value.replace('\n', '\\n').replace('\r', '\\r')
+
+
+# =======================================================================
 # SSX SIGNAL HANDLING - Graceful Shutdown Support
 # =======================================================================
 # Handles SIGINT (Ctrl+C) and SIGTERM to ensure all pending logs
@@ -578,4 +588,11 @@ if __name__ == '__main__':
         level=logging.INFO
     )
     logging.getLogger('requests').setLevel(logging.CRITICAL)
+    
+    # Suppress PTB's httpx client from logging full URLs (contains bot token)
+    # Fixes CodeQL: py/clear-text-logging-sensitive-data
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("httpcore").setLevel(logging.WARNING)
+    logging.getLogger("telegram.ext.Application").setLevel(logging.WARNING)
+    
     main()

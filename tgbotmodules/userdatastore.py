@@ -34,6 +34,20 @@ from typing import Optional, Tuple, Any
 # =======================================================================
 logger = logging.getLogger(__name__)
 
+# =======================================================================
+# SSX PATH INJECTION FIX - Safe Data Path Helper
+# =======================================================================
+def _safe_data_path(filename: str) -> str:
+    """Build a safe absolute path under SSX_DATA_PATH, preventing traversal."""
+    base = os.path.realpath(os.environ.get("SSX_DATA_PATH", "./data/"))
+    # Ensure base exists
+    os.makedirs(base, exist_ok=True)
+    # Use basename to prevent directory traversal
+    candidate = os.path.realpath(os.path.join(base, os.path.basename(filename)))
+    if not candidate.startswith(base):
+        raise ValueError(f"Path traversal attempt: {filename}")
+    return candidate
+
 # Maximum allowed size for Ghost Drive JSON files (10MB)
 MAX_JSON_SIZE_BYTES = 10 * 1024 * 1024  # 10MB
 
@@ -378,6 +392,84 @@ def _decompress_json_data(compressed_data: bytes) -> Optional[dict]:
         return None
 
 
+# =======================================================================
+# GHOST DRIVE - Telegram Bot API Helpers
+# =======================================================================
+def _get_bot_token_from_bot(bot: Any) -> str:
+    """Extract bot token from the PTB bot instance."""
+    # PTB v20 bot object has .token attribute
+    if hasattr(bot, 'token'):
+        return bot.token
+    raise ValueError("Could not extract bot token from bot instance")
+
+
+def _get_chat_history_via_api(bot_token: str, chat_id: int, limit: int = 100) -> list:
+    """
+    Fetch chat history using Telegram Bot API directly via requests.
+    
+    PTB v20 ExtBot doesn't have get_chat_history method, so we use the
+    Bot API directly for this sync operation.
+    
+    Args:
+        bot_token: The Telegram bot token.
+        chat_id: The channel chat ID.
+        limit: Maximum number of messages to fetch.
+        
+    Returns:
+        List of message dicts from the API response.
+    """
+    import requests as _requests
+    
+    url = f"https://api.telegram.org/bot{bot_token}/getChatHistory"
+    try:
+        resp = _requests.get(
+            url,
+            params={"chat_id": chat_id, "limit": limit},
+            timeout=10
+        )
+        if resp.ok:
+            data = resp.json()
+            if data.get("ok"):
+                return data.get("result", [])
+        logger.warning(f"[SSX GHOST DRIVE] getChatHistory API error: {resp.text[:200]}")
+    except Exception as e:
+        logger.warning(f"[SSX GHOST DRIVE] getChatHistory request failed: {e}")
+    return []
+
+
+def _get_pinned_message_document(bot_token: str, chat_id: int) -> Optional[dict]:
+    """
+    Get document from pinned message if available.
+    
+    This allows the backup to be pinned and retrieved via pinned_message.
+    
+    Args:
+        bot_token: The Telegram bot token.
+        chat_id: The channel chat ID.
+        
+    Returns:
+        Document dict or None if not found.
+    """
+    import requests as _requests
+    
+    url = f"https://api.telegram.org/bot{bot_token}/getChat"
+    try:
+        resp = _requests.get(
+            url,
+            params={"chat_id": chat_id},
+            timeout=10
+        )
+        if resp.ok:
+            data = resp.json()
+            if data.get("ok"):
+                pinned = data.get("result", {}).get("pinned_message")
+                if pinned and pinned.get("document"):
+                    return pinned["document"]
+    except Exception as e:
+        logger.warning(f"[SSX GHOST DRIVE] getChat request failed: {e}")
+    return None
+
+
 def load_from_ghost_drive(bot: Any) -> Tuple[bool, str]:
     """
     Load user data from the Ghost Drive (Telegram Channel backup).
@@ -414,26 +506,29 @@ def load_from_ghost_drive(bot: Any) -> Tuple[bool, str]:
     try:
         chat_id = int(DATABASE_CHANNEL_ID)
         
-        # Fetch recent messages with documents from the channel
-        messages = bot.get_chat_history(chat_id=chat_id, limit=100)
+        # Fetch recent messages with documents from the channel via Bot API
+        # PTB v20 ExtBot doesn't have get_chat_history, use API directly
+        bot_token = _get_bot_token_from_bot(bot)
+        messages_data = _get_chat_history_via_api(bot_token, chat_id, limit=100)
         
         # Find the latest backup document
         latest_backup = None
         latest_date = None
         
-        for msg in messages:
-            if msg.document:
-                caption = msg.caption or ""
+        for msg in messages_data:
+            if msg.get("document"):
+                caption = msg.get("caption", "")
                 if GHOST_DRIVE_BACKUP_PREFIX in caption:
-                    if latest_date is None or msg.date > latest_date:
+                    msg_date = msg.get("date", 0)
+                    if latest_date is None or msg_date > latest_date:
                         latest_backup = msg
-                        latest_date = msg.date
+                        latest_date = msg_date
         
         if not latest_backup:
             return (False, "No Ghost Drive backup found in channel - first-time setup")
         
-        # Download the document
-        file = bot.get_file(file_id=latest_backup.document.file_id)
+        # Download the document using PTB's get_file
+        file = bot.get_file(file_id=latest_backup["document"]["file_id"])
         
         fd, temp_path = tempfile.mkstemp(suffix='.json', prefix='.ghost_restore_')
         os.close(fd)
@@ -677,17 +772,19 @@ def _cleanup_old_backups(
     from tgbotmodules.spidermodules.generalcfg import GHOST_DRIVE_BACKUP_PREFIX
     
     try:
-        messages = bot.get_chat_history(chat_id=chat_id, limit=100)
+        # Use Bot API directly since PTB v20 doesn't have get_chat_history
+        bot_token = _get_bot_token_from_bot(bot)
+        messages_data = _get_chat_history_via_api(bot_token, chat_id, limit=100)
         
         # Collect all backup message IDs
         backup_messages = []
-        for msg in messages:
-            if msg.document:
-                caption = msg.caption or ""
+        for msg in messages_data:
+            if msg.get("document"):
+                caption = msg.get("caption", "")
                 if GHOST_DRIVE_BACKUP_PREFIX in caption:
                     backup_messages.append({
-                        'id': msg.message_id,
-                        'date': msg.date
+                        'id': msg.get("message_id"),
+                        'date': msg.get("date", 0)
                     })
         
         # Sort by date (newest first) and keep only keep_count
